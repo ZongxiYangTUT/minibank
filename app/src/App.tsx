@@ -396,70 +396,119 @@ export default function App() {
   const balanceLamports = balance ? BigInt(balance.balance.toString()) : 0n;
   const balanceSolStr = balance ? lamportsToSolStr(balanceLamports) : "0.0";
 
+  function truncateAddress(addr: string, chars = 4): string {
+    if (!addr || addr.length <= chars * 2 + 3) return addr;
+    return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
+  }
+
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("已复制到剪贴板");
+      setTimeout(() => setStatus(""), 1500);
+    } catch {
+      setStatus("复制失败");
+    }
+  }
+
+  const SolIcon = () => (
+    <svg className="sol-icon" viewBox="0 0 397 311" fill="none">
+      <path d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 9.2 6.5 6.1 11.2l-62.7 92.1c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-9.2-6.5-6.1-11.2l64.2-92.1z" fill="url(#sol-grad)" />
+      <path d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 9.2 6.5 6.1 11.2l-62.7 92.1c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-9.2-6.5-6.1-11.2L64.6 3.8z" fill="url(#sol-grad)" />
+      <path d="M332.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8H5.5c-5.8 0-9.2 6.5-6.1 11.2l62.7 92.1c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 9.2-6.5 6.1-11.2l-62.7-92.1z" fill="url(#sol-grad)" />
+      <defs>
+        <linearGradient id="sol-grad" x1="0" y1="0" x2="1" y2="1" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#9945FF" />
+          <stop offset="1" stopColor="#14F195" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+
+  const CopyIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+
   return (
     <div className="container">
-      <h1>Minibank</h1>
-
-      <div className="row">
-        <button onClick={handleAirdrop} disabled={!walletPublicKey}>
-          Airdrop 1 SOL
-        </button>
-        <button onClick={refreshWalletBalance} disabled={!walletPublicKey}>
-          Refresh Wallet Balance
-        </button>
-        <div className="meta">
-          <div>
-            Wallet Mode: <b>{walletState}</b> (Local Keypair)
+      <header className="app-header">
+        <h1 className="app-logo">Minibank</h1>
+        <div className="header-actions">
+          <div className="wallet-info">
+            {walletPublicKey ? (
+              <>
+                <span className="wallet-badge">{walletState}</span>
+                <div className="address-box">
+                  <span className="mono">{truncateAddress(walletPublicKey.toBase58())}</span>
+                  <button
+                    className="copy-btn"
+                    onClick={() => copyToClipboard(walletPublicKey.toBase58())}
+                    title="复制地址"
+                  >
+                    <CopyIcon />
+                  </button>
+                </div>
+                <div className="sol-balance">
+                  <SolIcon />
+                  <span>{walletSol} SOL</span>
+                </div>
+              </>
+            ) : (
+              <span style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                未配置钱包 (VITE_LOCAL_KEYPAIR_JSON)
+              </span>
+            )}
           </div>
-          <div>
-            Address:{" "}
-            <span className="mono">{walletPublicKey ? walletPublicKey.toBase58() : "-"}</span>
-          </div>
-          <div>
-            Wallet SOL: <span className="mono">{walletSol}</span>
-          </div>
-          <div>
-            Selected account_id: <span className="mono">{selectedAccountId}</span>
-          </div>
-          <div>
-            PDA: <span className="mono">{pda ? pda.toBase58() : "-"}</span>
+          <div className="row">
+            <button className="primary" onClick={handleAirdrop} disabled={!walletPublicKey}>
+              Airdrop 1 SOL
+            </button>
+            <button onClick={refreshWalletBalance} disabled={!walletPublicKey}>
+              Refresh
+            </button>
           </div>
         </div>
-      </div>
+      </header>
+
+      {walletPublicKey && (
+        <div className="meta-compact" style={{ marginBottom: 8 }}>
+          <span>account_id: <span>{selectedAccountId}</span></span>
+          <span>PDA: <span className="mono">{pda ? truncateAddress(pda.toBase58()) : "-"}</span></span>
+        </div>
+      )}
 
       <div className="card">
         <h2>账户 & 余额</h2>
         <div className="row">
           <button
+            className="primary"
             onClick={() => {
               setCreateModalError("");
               setShowCreateModal(true);
             }}
             disabled={!walletPublicKey || !program}
           >
-            create_account
+            创建账户
           </button>
           <button onClick={refreshBalance} disabled={!walletPublicKey || !program || !pda || isRefreshing}>
-            {isRefreshing ? "Refreshing..." : "Refresh"}
+            {isRefreshing ? "刷新中..." : "刷新余额"}
           </button>
           <button onClick={refreshAccountsList} disabled={!walletPublicKey || !program}>
-            Refresh Accounts List
+            刷新列表
           </button>
         </div>
 
         <div className="balance">
-          <div>MiniAccount</div>
-          <div className="balanceLine">
-            <span className="mono">{balance?.name ?? "-"}</span>
-          </div>
-          <div className="balanceLine">
-            <span>balance:</span>
-            <b>{balance ? balance.balance.toString() : "0"}</b>
-            <span className="muted">lamports</span>
-          </div>
-          <div className="balanceLine">
-            <b>{balance ? balanceSolStr : "0.0"}</b>
+          <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>MiniAccount · {balance?.name ?? "-"}</div>
+          <div className="balanceLine" style={{ marginTop: 12 }}>
+            <span className="balance-hero">{balance ? balanceSolStr : "0.0"}</span>
             <span className="muted">SOL</span>
+          </div>
+          <div className="balanceLine">
+            <span className="muted">{balance ? balance.balance.toString() : "0"} lamports</span>
           </div>
         </div>
       </div>
@@ -473,18 +522,26 @@ export default function App() {
             {accountsList.map((acct) => (
               <div
                 key={acct.pubkey}
-                className="accountItem"
-                style={{
-                  cursor: "pointer",
-                  borderColor:
-                    acct.accountId === selectedAccountId ? "#888" : undefined
-                }}
+                className={`accountItem ${acct.accountId === selectedAccountId ? "selected" : ""}`}
+                style={{ cursor: "pointer" }}
                 onClick={() => {
                   setSelectedAccountId(acct.accountId);
                   refreshBalance();
                 }}
               >
-                <div className="mono">{acct.pubkey}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span className="mono">{truncateAddress(acct.pubkey)}</span>
+                  <button
+                    className="copy-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyToClipboard(acct.pubkey);
+                    }}
+                    title="复制 PDA"
+                  >
+                    <CopyIcon />
+                  </button>
+                </div>
                 <div>account_id: {acct.accountId}</div>
                 <div>name: {acct.name}</div>
                 <div>balance: {acct.balance} lamports</div>
@@ -502,12 +559,13 @@ export default function App() {
                 </div>
                 <div className="row">
                   <button
+                    className="primary"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
                     }}
                   >
-                    deposit
+                    存入
                   </button>
                   <button
                     onClick={(e) => {
@@ -515,7 +573,7 @@ export default function App() {
                       handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
                     }}
                   >
-                    withdraw
+                    取出
                   </button>
                   <button
                     onClick={(e) => {
