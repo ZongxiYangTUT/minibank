@@ -44,7 +44,7 @@ describe("minibank", () => {
 
   it("deposit increases mini_account balance", async () => {
     const [miniAccountPda] = getMiniAccountPda(payer);
-    const amount = new anchor.BN(1_000_000);
+    const amount = new anchor.BN(1_000_000_000);
 
     const tx = await program.methods
       .deposit(amount)

@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{transfer, Transfer};
 
 declare_id!("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
 
@@ -16,7 +17,19 @@ pub mod minibank {
 
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         msg!("Depositing {} lamports into account", amount);
-        ctx.accounts.mini_account.balance += amount;
+
+        let from_pubkey = ctx.accounts.sender.to_account_info();
+        let to_pubkey = ctx.accounts.mini_account.to_account_info();
+
+        let cpi_context = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            Transfer {
+                from: from_pubkey,
+                to: to_pubkey,
+            },
+        );
+        transfer(cpi_context, amount)?;
+        ctx.accounts.mini_account.balance += amount; // 更新账户余额
         msg!("Deposit successful");
         msg!("New balance: {}", ctx.accounts.mini_account.balance);
         Ok(())
@@ -28,7 +41,7 @@ pub struct InitializeBank {}
 
 #[derive(Accounts)]
 pub struct CreateAccount<'info> {
-    #[account(init, seeds = [b"mini_account", payer.key().as_ref()], bump, payer = payer, space = 8 + std::mem::size_of::<MiniAccount>())]
+    #[account(init_if_needed, seeds = [b"mini_account", payer.key().as_ref()], bump, payer = payer, space = 8 + std::mem::size_of::<MiniAccount>())]
     mini_account: Account<'info, MiniAccount>,
     #[account(mut)]
     payer: Signer<'info>,
