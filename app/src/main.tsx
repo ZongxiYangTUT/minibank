@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { Buffer } from "buffer/";
 
 import App from "./App";
+import "./i18n";
 import "./styles.css";
 
 // Anchor/web3 in browser runtime needs global Buffer.

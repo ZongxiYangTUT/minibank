@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Program, BN, AnchorProvider } from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { useTranslation } from "react-i18next";
 
 import idl from "./idl/minibank.json";
 
@@ -38,6 +39,7 @@ function lamportsToSolStr(lamports: bigint): string {
 
 export default function App() {
   const endpoint = "http://127.0.0.1:8899";
+  const { t, i18n } = useTranslation();
 
   const connection = useMemo(() => new Connection(endpoint, "confirmed"), [endpoint]);
   const localKeypairRaw = (import.meta as any).env?.VITE_LOCAL_KEYPAIR_JSON as string | undefined;
@@ -71,6 +73,17 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const [selectedAccountId, setSelectedAccountId] = useState<string>("1");
+
+  function friendlyError(e: any): string {
+    const raw = e?.message || "";
+    if (raw.includes("AccountNotEmpty") || raw.includes("Account not empty")) return t("deleteNonZero");
+    if (raw.includes("Account does not exist") || raw.includes("could not find account")) return t("accountNotFound");
+    if (raw.includes("already in use") || raw.includes("already exists")) return t("accountExists");
+    if (raw.includes("InsufficientBalance") || raw.includes("Insufficient balance")) {
+      return i18n.language === "zh" ? "余额不足" : "Insufficient balance";
+    }
+    return raw || t("txFailed");
+  }
 
   function parseU64ToBN(s: string): BN | null {
     const trimmed = s.trim();
@@ -123,10 +136,10 @@ export default function App() {
     try {
       const acct = (await (program.account as any).miniAccount.fetch(pda)) as MiniAccountData;
       setBalance(acct);
-      setStatus("Balance refreshed");
+      setStatus(t("balanceRefreshed"));
     } catch (e: any) {
       setBalance(null);
-      setStatus("MiniAccount not found (need create_account first)");
+      setStatus(t("accountNotFound"));
     } finally {
       setIsRefreshing(false);
     }
@@ -184,7 +197,7 @@ export default function App() {
     }
     if (!walletPublicKey) {
       setBalance(null);
-      setStatus("未配置本地 keypair，请先配置 VITE_LOCAL_KEYPAIR_JSON");
+      setStatus(t("walletDisconnected"));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletPublicKey, program, pda]);
@@ -198,15 +211,15 @@ export default function App() {
   async function handleAirdrop() {
     if (!walletPublicKey) return;
     setErrorText("");
-    setStatus("Airdrop 1 SOL...");
+    setStatus(t("airdrop"));
     try {
       const sig = await connection.requestAirdrop(walletPublicKey, 1_000_000_000);
       await connection.confirmTransaction(sig, "confirmed");
-      setStatus("Airdrop confirmed");
+      setStatus(t("airdropConfirmed"));
       await refreshWalletBalance();
     } catch (e: any) {
-      setErrorText(e?.message || "Airdrop failed");
-      setStatus("Airdrop failed");
+      setErrorText(friendlyError(e));
+      setStatus(t("airdropFailed"));
     }
   }
 
@@ -234,7 +247,7 @@ export default function App() {
     try {
       const existed = await (program.account as any).miniAccount.fetchNullable(pdaForNew);
       if (existed) {
-        setCreateModalError("当前钱包的储蓄账户已存在（同一 PDA 只能创建一次）");
+        setCreateModalError(t("accountExists"));
         setStatus("create_account skipped (already exists)");
         return;
       }
@@ -253,7 +266,7 @@ export default function App() {
       await refreshAccountsList();
       setShowCreateModal(false);
     } catch (e: any) {
-      const msg = e?.message || "Create account failed";
+      const msg = friendlyError(e);
       setErrorText(msg);
       setCreateModalError(msg);
       setStatus("create_account failed");
@@ -276,7 +289,7 @@ export default function App() {
     )[0];
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
-      setErrorText("amount must be > 0");
+      setErrorText(t("invalidAmount"));
       return;
     }
 
@@ -295,7 +308,7 @@ export default function App() {
       await refreshBalance();
       await refreshAccountsList();
     } catch (e: any) {
-      setErrorText(e?.message || "Deposit failed");
+      setErrorText(friendlyError(e));
       setStatus("deposit failed");
     }
   }
@@ -314,7 +327,7 @@ export default function App() {
     )[0];
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
-      setErrorText("amount must be > 0");
+      setErrorText(t("invalidAmount"));
       return;
     }
 
@@ -333,7 +346,7 @@ export default function App() {
       await refreshBalance();
       await refreshAccountsList();
     } catch (e: any) {
-      setErrorText(e?.message || "Withdraw failed");
+      setErrorText(friendlyError(e));
       setStatus("withdraw failed");
     }
   }
@@ -343,7 +356,7 @@ export default function App() {
     const idStr = accountIdStr ?? selectedAccountId;
     const accountIdBn = parseU64ToBN(idStr);
     if (!accountIdBn || accountIdBn.lte(new BN(0))) {
-      setErrorText("account_id 非法");
+      setErrorText(t("invalidAccountId"));
       return;
     }
 
@@ -404,10 +417,10 @@ export default function App() {
   async function copyToClipboard(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      setStatus("已复制到剪贴板");
+      setStatus(t("copied"));
       setTimeout(() => setStatus(""), 1500);
     } catch {
-      setStatus("复制失败");
+      setStatus(t("copyFailed"));
     }
   }
 
@@ -434,13 +447,27 @@ export default function App() {
 
   return (
     <div className="container">
+      <div className="lang-corner">
+        <label className="lang-select-wrap">
+          <span>{t("langLabel")}</span>
+          <select
+            className="lang-select"
+            value={i18n.language.startsWith("zh") ? "zh" : "en"}
+            onChange={(e) => i18n.changeLanguage(e.target.value)}
+          >
+            <option value="zh">{t("langZh")}</option>
+            <option value="en">{t("langEn")}</option>
+          </select>
+        </label>
+      </div>
+
       <header className="app-header">
-        <h1 className="app-logo">Minibank</h1>
+        <h1 className="app-logo">{t("title")}</h1>
         <div className="header-actions">
           <div className="wallet-info">
             {walletPublicKey ? (
               <>
-                <span className="wallet-badge">{walletState}</span>
+                <span className="wallet-badge">{walletState === "Connected" ? t("connected") : walletState}</span>
                 <div className="address-box">
                   <span className="mono">{truncateAddress(walletPublicKey.toBase58())}</span>
                   <button
@@ -458,16 +485,16 @@ export default function App() {
               </>
             ) : (
               <span style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                未配置钱包 (VITE_LOCAL_KEYPAIR_JSON)
+                {t("notConfigured")}
               </span>
             )}
           </div>
           <div className="row">
             <button className="primary" onClick={handleAirdrop} disabled={!walletPublicKey}>
-              Airdrop 1 SOL
+              {t("airdrop")}
             </button>
             <button onClick={refreshWalletBalance} disabled={!walletPublicKey}>
-              Refresh
+              {t("refresh")}
             </button>
           </div>
         </div>
@@ -481,7 +508,7 @@ export default function App() {
       )}
 
       <div className="card">
-        <h2>账户 & 余额</h2>
+        <h2>{t("accountAndBalance")}</h2>
         <div className="row">
           <button
             className="primary"
@@ -491,13 +518,13 @@ export default function App() {
             }}
             disabled={!walletPublicKey || !program}
           >
-            创建账户
+            {t("createAccount")}
           </button>
           <button onClick={refreshBalance} disabled={!walletPublicKey || !program || !pda || isRefreshing}>
-            {isRefreshing ? "刷新中..." : "刷新余额"}
+            {isRefreshing ? "..." : t("refreshBalance")}
           </button>
           <button onClick={refreshAccountsList} disabled={!walletPublicKey || !program}>
-            刷新列表
+            {t("refreshList")}
           </button>
         </div>
 
@@ -514,9 +541,9 @@ export default function App() {
       </div>
 
       <div className="card">
-        <h2>储蓄账户列表</h2>
+        <h2>{t("accountList")}</h2>
         {accountsList.length === 0 ? (
-          <div className="muted">暂无账户（或读取失败）</div>
+          <div className="muted">{t("emptyList")}</div>
         ) : (
           <div className="accountList">
             {accountsList.map((acct) => (
@@ -546,7 +573,7 @@ export default function App() {
                 <div>name: {acct.name}</div>
                 <div>balance: {acct.balance} lamports</div>
                 <div className="field">
-                  <label>amount (SOL)</label>
+                  <label>{t("amountSol")}</label>
                   <input
                     value={amountByAccountId[acct.accountId] ?? "0.1"}
                     onClick={(e) => e.stopPropagation()}
@@ -565,7 +592,7 @@ export default function App() {
                       handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
                     }}
                   >
-                    存入
+                    {t("deposit")}
                   </button>
                   <button
                     onClick={(e) => {
@@ -573,7 +600,7 @@ export default function App() {
                       handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
                     }}
                   >
-                    取出
+                    {t("withdraw")}
                   </button>
                   <button
                     onClick={(e) => {
@@ -582,7 +609,7 @@ export default function App() {
                     }}
                     disabled={isDeletingAccount}
                   >
-                    关闭账户
+                    {t("closeAccount")}
                   </button>
                 </div>
               </div>
@@ -594,11 +621,11 @@ export default function App() {
 
       <div className="status">
         <div>
-          <b>Status:</b> {status}
+          <b>{t("status")}:</b> {status}
         </div>
         {errorText ? (
           <div className="error">
-            <b>Error:</b> {errorText}
+            <b>{t("error")}:</b> {errorText}
           </div>
         ) : null}
       </div>
@@ -606,9 +633,9 @@ export default function App() {
       {showCreateModal ? (
         <div className="modalMask" onClick={() => setShowCreateModal(false)}>
           <div className="modalCard" onClick={(e) => e.stopPropagation()}>
-            <h3>创建储蓄账户</h3>
+            <h3>{t("createModalTitle")}</h3>
             <div className="field">
-              <label>账户名称</label>
+              <label>{t("accountName")}</label>
               <input
                 value={newAccountName}
                 onChange={(e) => setNewAccountName(e.target.value)}
@@ -634,9 +661,9 @@ export default function App() {
                   isCreatingAccount
                 }
               >
-                {isCreatingAccount ? "创建中..." : "确认创建"}
+                {isCreatingAccount ? t("creating") : t("confirmCreate")}
               </button>
-              <button onClick={() => setShowCreateModal(false)}>取消</button>
+              <button onClick={() => setShowCreateModal(false)}>{t("cancel")}</button>
             </div>
             {createModalError ? <div className="error">{createModalError}</div> : null}
           </div>
