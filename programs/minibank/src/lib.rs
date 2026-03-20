@@ -34,6 +34,48 @@ pub mod minibank {
         msg!("New balance: {}", ctx.accounts.mini_account.balance);
         Ok(())
     }
+
+    pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
+        msg!("Withdrawing {} lamports from account", amount);
+        if ctx.accounts.mini_account.balance < amount {
+            return Err(ErrorCode::InsufficientBalance.into());
+        }
+        // system_program::transfer的from必须是一个system account，所以直接改lamports
+
+        // let from_pubkey = ctx.accounts.mini_account.to_account_info();
+        // let to_pubkey = ctx.accounts.recipient.to_account_info();
+
+        // let seed = to_pubkey.key();
+        // let signer_seeds: &[&[&[u8]]] =
+        //     &[&[b"mini_account", seed.as_ref(), &[ctx.bumps.mini_account]]];
+
+        // let cpi_context = CpiContext::new(
+        //     ctx.accounts.system_program.to_account_info(),
+        //     Transfer {
+        //         from: from_pubkey,
+        //         to: to_pubkey,
+        //     },
+        // )
+        // .with_signer(signer_seeds);
+
+        // transfer(cpi_context, amount)?;
+
+        **ctx
+            .accounts
+            .mini_account
+            .to_account_info()
+            .try_borrow_mut_lamports()? -= amount;
+        **ctx
+            .accounts
+            .recipient
+            .to_account_info()
+            .try_borrow_mut_lamports()? += amount;
+
+        ctx.accounts.mini_account.balance -= amount;
+        msg!("Withdrawal successful");
+        msg!("New balance: {}", ctx.accounts.mini_account.balance);
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -56,6 +98,14 @@ pub struct Deposit<'info> {
     mini_account: Account<'info, MiniAccount>,
     system_program: Program<'info, System>,
 }
+#[derive(Accounts)]
+pub struct Withdraw<'info> {
+    #[account(mut, seeds = [b"mini_account", recipient.key().as_ref()], bump)]
+    mini_account: Account<'info, MiniAccount>,
+    #[account(mut)]
+    recipient: SystemAccount<'info>,
+    system_program: Program<'info, System>,
+}
 /// 包含银行账户的配置信息
 #[account]
 pub struct BankConfig {}
@@ -65,4 +115,10 @@ pub struct BankConfig {}
 pub struct MiniAccount {
     name: String, // 账户名称
     balance: u64, // 账户余额(solana lamports)
+}
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("Insufficient balance")]
+    InsufficientBalance,
 }

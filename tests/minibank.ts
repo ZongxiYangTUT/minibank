@@ -61,4 +61,26 @@ describe("minibank", () => {
     const accountAfter = await program.account.miniAccount.fetch(miniAccountPda);
     assert.equal(accountAfter.balance.toNumber(), amount.toNumber());
   });
+
+  it("withdraw decreases mini_account balance", async () => {
+    const [miniAccountPda] = getMiniAccountPda(payer);
+    const withdrawAmount = new anchor.BN(400_000_000);
+
+    const before = await program.account.miniAccount.fetch(miniAccountPda);
+
+    const tx = await program.methods
+      .withdraw(withdrawAmount)
+      .accountsPartial({
+        recipient: payer,
+        miniAccount: miniAccountPda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log("withdraw tx:", tx);
+
+    const after = await program.account.miniAccount.fetch(miniAccountPda);
+    const expected = before.balance.sub(withdrawAmount);
+    assert.equal(after.balance.toString(), expected.toString());
+  });
 });
