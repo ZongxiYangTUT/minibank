@@ -7,15 +7,20 @@ declare_id!("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
 pub mod minibank {
     use super::*;
 
-    pub fn create_account(ctx: Context<CreateAccount>, name: String) -> Result<()> {
+    pub fn create_account(
+        ctx: Context<CreateAccount>,
+        account_id: u64,
+        name: String,
+    ) -> Result<()> {
         msg!("Creating account for {}", name);
+        ctx.accounts.mini_account.account_id = account_id;
         ctx.accounts.mini_account.name = name;
         ctx.accounts.mini_account.balance = 0;
         msg!("Account created successfully");
         Ok(())
     }
 
-    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+    pub fn deposit(ctx: Context<Deposit>, _account_id: u64, amount: u64) -> Result<()> {
         msg!("Depositing {} lamports into account", amount);
 
         let from_pubkey = ctx.accounts.sender.to_account_info();
@@ -35,7 +40,7 @@ pub mod minibank {
         Ok(())
     }
 
-    pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
+    pub fn withdraw(ctx: Context<Withdraw>, _account_id: u64, amount: u64) -> Result<()> {
         msg!("Withdrawing {} lamports from account", amount);
         if ctx.accounts.mini_account.balance < amount {
             return Err(ErrorCode::InsufficientBalance.into());
@@ -82,8 +87,9 @@ pub mod minibank {
 pub struct InitializeBank {}
 
 #[derive(Accounts)]
+#[instruction(account_id: u64)] // Accounts用到了instruction参数
 pub struct CreateAccount<'info> {
-    #[account(init, seeds = [b"mini_account", payer.key().as_ref()], bump, payer = payer, space = 8 + std::mem::size_of::<MiniAccount>())]
+    #[account(init, seeds = [b"mini_account", payer.key().as_ref(), &account_id.to_le_bytes()], bump, payer = payer, space = 8 + std::mem::size_of::<MiniAccount>())]
     mini_account: Account<'info, MiniAccount>,
     #[account(mut)]
     payer: Signer<'info>,
@@ -91,16 +97,18 @@ pub struct CreateAccount<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(account_id: u64)]
 pub struct Deposit<'info> {
     #[account(mut)]
     sender: Signer<'info>,
-    #[account(mut, seeds = [b"mini_account", sender.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"mini_account", sender.key().as_ref(), &account_id.to_le_bytes()], bump)]
     mini_account: Account<'info, MiniAccount>,
     system_program: Program<'info, System>,
 }
 #[derive(Accounts)]
+#[instruction(account_id: u64)]
 pub struct Withdraw<'info> {
-    #[account(mut, seeds = [b"mini_account", recipient.key().as_ref()], bump)]
+    #[account(mut, seeds = [b"mini_account", recipient.key().as_ref(), &account_id.to_le_bytes()], bump)]
     mini_account: Account<'info, MiniAccount>,
     #[account(mut)]
     recipient: SystemAccount<'info>,
@@ -113,8 +121,9 @@ pub struct BankConfig {}
 // 这种储蓄账户必须是PDA，否则无法转出余额
 #[account]
 pub struct MiniAccount {
-    name: String, // 账户名称
-    balance: u64, // 账户余额(solana lamports)
+    name: String,    // 账户名称
+    balance: u64,    // 账户余额(solana lamports)
+    account_id: u64, // 账户ID
 }
 
 #[error_code]

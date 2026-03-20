@@ -45,6 +45,10 @@
               {
                 "kind": "account",
                 "path": "payer"
+              },
+              {
+                "kind": "arg",
+                "path": "account_id"
               }
             ]
           }
@@ -60,6 +64,10 @@
         }
       ],
       "args": [
+        {
+          "name": "account_id",
+          "type": "u64"
+        },
         {
           "name": "name",
           "type": "string"
@@ -109,6 +117,10 @@
               {
                 "kind": "account",
                 "path": "sender"
+              },
+              {
+                "kind": "arg",
+                "path": "account_id"
               }
             ]
           }
@@ -119,6 +131,10 @@
         }
       ],
       "args": [
+        {
+          "name": "_account_id",
+          "type": "u64"
+        },
         {
           "name": "amount",
           "type": "u64"
@@ -163,6 +179,10 @@
               {
                 "kind": "account",
                 "path": "recipient"
+              },
+              {
+                "kind": "arg",
+                "path": "account_id"
               }
             ]
           }
@@ -177,6 +197,10 @@
         }
       ],
       "args": [
+        {
+          "name": "_account_id",
+          "type": "u64"
+        },
         {
           "name": "amount",
           "type": "u64"
@@ -218,6 +242,10 @@
           },
           {
             "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "account_id",
             "type": "u64"
           }
         ]

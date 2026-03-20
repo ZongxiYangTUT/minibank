@@ -10,10 +10,12 @@ const accountSeed = "mini_account";
 type MiniAccountData = {
   name: string;
   balance: BN;
+  accountId?: BN;
 };
 
 type ListedAccount = {
   pubkey: string;
+  accountId: string;
   name: string;
   balance: string;
 };
@@ -58,6 +60,7 @@ export default function App() {
   const [amountSol, setAmountSol] = useState<string>("0.1");
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [newAccountName, setNewAccountName] = useState<string>("alice-savings");
+  const [newAccountId, setNewAccountId] = useState<string>("1");
   const [createModalError, setCreateModalError] = useState<string>("");
   const [isCreatingAccount, setIsCreatingAccount] = useState<boolean>(false);
 
@@ -65,13 +68,32 @@ export default function App() {
   const [accountsList, setAccountsList] = useState<ListedAccount[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("1");
+
+  function parseU64ToBN(s: string): BN | null {
+    const trimmed = s.trim();
+    if (!trimmed) return null;
+    if (!/^\d+$/.test(trimmed)) return null;
+    return new BN(trimmed);
+  }
+
+  const selectedAccountIdBn = useMemo(() => parseU64ToBN(selectedAccountId), [selectedAccountId]);
+
+  function accountIdToLeBytes(accountIdBn: BN): Uint8Array {
+    return accountIdBn.toArrayLike(Buffer, "le", 8);
+  }
+
   const pda = useMemo(() => {
-    if (!walletPublicKey) return null;
+    if (!walletPublicKey || !selectedAccountIdBn) return null;
     return PublicKey.findProgramAddressSync(
-      [new TextEncoder().encode(accountSeed), walletPublicKey.toBuffer()],
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(selectedAccountIdBn)
+      ],
       programId
     )[0];
-  }, [walletPublicKey]);
+  }, [walletPublicKey, selectedAccountIdBn]);
 
   const program = useMemo(() => {
     if (!walletPublicKey || !localKeypair) return null;
@@ -109,19 +131,44 @@ export default function App() {
   }
 
   async function refreshAccountsList() {
-    if (!program || !pda) {
-      setAccountsList([]);
-      return;
-    }
     try {
-      const acct = (await (program.account as any).miniAccount.fetch(pda)) as MiniAccountData;
-      setAccountsList([
-        {
-          pubkey: pda.toBase58(),
+      if (!program || !walletPublicKey) {
+        setAccountsList([]);
+        return;
+      }
+
+      const allAccounts = await (program.account as any).miniAccount.all();
+      const listed: ListedAccount[] = [];
+
+      for (const item of allAccounts) {
+        const acct = item.account as any;
+        const accountIdRaw = acct.accountId ?? acct.account_id;
+        if (accountIdRaw === undefined || accountIdRaw === null) continue;
+
+        const accountIdStr = accountIdRaw.toString();
+        const accountIdBn = new BN(accountIdStr);
+        const expectedPda = PublicKey.findProgramAddressSync(
+          [
+            new TextEncoder().encode(accountSeed),
+            walletPublicKey.toBuffer(),
+            accountIdToLeBytes(accountIdBn)
+          ],
+          programId
+        )[0];
+
+        if (!item.publicKey.equals(expectedPda)) continue;
+
+        listed.push({
+          pubkey: item.publicKey.toBase58(),
+          accountId: accountIdStr,
           name: acct.name,
           balance: acct.balance.toString()
-        }
-      ]);
+        });
+      }
+
+      // 简单排序：按 account_id 升序展示
+      listed.sort((a, b) => Number(a.accountId) - Number(b.accountId));
+      setAccountsList(listed);
     } catch (e: any) {
       setAccountsList([]);
     }
@@ -161,14 +208,29 @@ export default function App() {
     }
   }
 
-  async function handleCreateAccount(name: string) {
-    if (!program || !pda || !walletPublicKey) return;
+  async function handleCreateAccount(name: string, accountIdStr: string) {
+    if (!program || !walletPublicKey) return;
+    const accountIdBn = parseU64ToBN(accountIdStr);
+    if (!accountIdBn || accountIdBn.lte(new BN(0))) {
+      setCreateModalError("account_id 必须是大于等于 1 的整数");
+      return;
+    }
+
+    const pdaForNew = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(accountIdBn)
+      ],
+      programId
+    )[0];
+
     setErrorText("");
     setCreateModalError("");
     setStatus("Creating account...");
     setIsCreatingAccount(true);
     try {
-      const existed = await (program.account as any).miniAccount.fetchNullable(pda);
+      const existed = await (program.account as any).miniAccount.fetchNullable(pdaForNew);
       if (existed) {
         setCreateModalError("当前钱包的储蓄账户已存在（同一 PDA 只能创建一次）");
         setStatus("create_account skipped (already exists)");
@@ -176,14 +238,15 @@ export default function App() {
       }
 
       await program.methods
-        .createAccount(name)
+        .createAccount(accountIdBn, name)
         .accounts({
-          miniAccount: pda,
+          miniAccount: pdaForNew,
           payer: walletPublicKey,
           systemProgram: SystemProgram.programId
         })
         .rpc();
       setStatus("create_account confirmed");
+      setSelectedAccountId(accountIdStr);
       await refreshBalance();
       await refreshAccountsList();
       setShowCreateModal(false);
@@ -198,7 +261,7 @@ export default function App() {
   }
 
   async function handleDeposit() {
-    if (!program || !pda || !walletPublicKey) return;
+    if (!program || !pda || !walletPublicKey || !selectedAccountIdBn) return;
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
       setErrorText("amount must be > 0");
@@ -209,7 +272,7 @@ export default function App() {
     setStatus("Depositing...");
     try {
       await program.methods
-        .deposit(new BN(lamports.toString()))
+        .deposit(selectedAccountIdBn, new BN(lamports.toString()))
         .accounts({
           sender: walletPublicKey,
           miniAccount: pda,
@@ -226,7 +289,7 @@ export default function App() {
   }
 
   async function handleWithdraw() {
-    if (!program || !pda || !walletPublicKey) return;
+    if (!program || !pda || !walletPublicKey || !selectedAccountIdBn) return;
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
       setErrorText("amount must be > 0");
@@ -237,7 +300,7 @@ export default function App() {
     setStatus("Withdrawing...");
     try {
       await program.methods
-        .withdraw(new BN(lamports.toString()))
+        .withdraw(selectedAccountIdBn, new BN(lamports.toString()))
         .accounts({
           miniAccount: pda,
           recipient: walletPublicKey,
@@ -281,6 +344,9 @@ export default function App() {
             Wallet SOL: <span className="mono">{walletSol}</span>
           </div>
           <div>
+            Selected account_id: <span className="mono">{selectedAccountId}</span>
+          </div>
+          <div>
             PDA: <span className="mono">{pda ? pda.toBase58() : "-"}</span>
           </div>
         </div>
@@ -294,7 +360,7 @@ export default function App() {
               setCreateModalError("");
               setShowCreateModal(true);
             }}
-            disabled={!walletPublicKey || !program || !pda}
+            disabled={!walletPublicKey || !program}
           >
             create_account
           </button>
@@ -330,8 +396,21 @@ export default function App() {
         ) : (
           <div className="accountList">
             {accountsList.map((acct) => (
-              <div key={acct.pubkey} className="accountItem">
+              <div
+                key={acct.pubkey}
+                className="accountItem"
+                style={{
+                  cursor: "pointer",
+                  borderColor:
+                    acct.accountId === selectedAccountId ? "#888" : undefined
+                }}
+                onClick={() => {
+                  setSelectedAccountId(acct.accountId);
+                  refreshBalance();
+                }}
+              >
                 <div className="mono">{acct.pubkey}</div>
+                <div>account_id: {acct.accountId}</div>
                 <div>name: {acct.name}</div>
                 <div>balance: {acct.balance} lamports</div>
               </div>
@@ -380,10 +459,24 @@ export default function App() {
                 placeholder="alice-savings"
               />
             </div>
+            <div className="field">
+              <label>account_id (u64)</label>
+              <input
+                value={newAccountId}
+                onChange={(e) => setNewAccountId(e.target.value)}
+                placeholder="1"
+              />
+            </div>
             <div className="row">
               <button
-                onClick={() => handleCreateAccount(newAccountName.trim())}
-                disabled={!newAccountName.trim() || !walletPublicKey || !program || !pda || isCreatingAccount}
+                onClick={() => handleCreateAccount(newAccountName.trim(), newAccountId.trim())}
+                disabled={
+                  !newAccountName.trim() ||
+                  !newAccountId.trim() ||
+                  !walletPublicKey ||
+                  !program ||
+                  isCreatingAccount
+                }
               >
                 {isCreatingAccount ? "创建中..." : "确认创建"}
               </button>
