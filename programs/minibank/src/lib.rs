@@ -83,7 +83,7 @@ pub struct InitializeBank {}
 
 #[derive(Accounts)]
 pub struct CreateAccount<'info> {
-    #[account(init_if_needed, seeds = [b"mini_account", payer.key().as_ref()], bump, payer = payer, space = 8 + std::mem::size_of::<MiniAccount>())]
+    #[account(init, seeds = [b"mini_account", payer.key().as_ref()], bump, payer = payer, space = 8 + std::mem::size_of::<MiniAccount>())]
     mini_account: Account<'info, MiniAccount>,
     #[account(mut)]
     payer: Signer<'info>,

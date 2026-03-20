@@ -95,3 +95,34 @@ button:disabled {
   word-break: break-word;
 }
 
+.accountList {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.accountItem {
+  border: 1px solid #ededed;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.modalMask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modalCard {
+  width: min(520px, 92vw);
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e7e7e7;
+  padding: 16px;
+}
+

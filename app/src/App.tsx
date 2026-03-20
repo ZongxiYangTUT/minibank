@@ -12,6 +12,12 @@ type MiniAccountData = {
   balance: BN;
 };
 
+type ListedAccount = {
+  pubkey: string;
+  name: string;
+  balance: string;
+};
+
 function parseSolToLamports(solStr: string): bigint {
   const trimmed = solStr.trim();
   if (!trimmed) return 0n;
@@ -49,10 +55,14 @@ export default function App() {
   const [status, setStatus] = useState<string>("");
   const [errorText, setErrorText] = useState<string>("");
 
-  const [accountName, setAccountName] = useState<string>("alice-savings");
   const [amountSol, setAmountSol] = useState<string>("0.1");
+  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [newAccountName, setNewAccountName] = useState<string>("alice-savings");
+  const [createModalError, setCreateModalError] = useState<string>("");
+  const [isCreatingAccount, setIsCreatingAccount] = useState<boolean>(false);
 
   const [balance, setBalance] = useState<MiniAccountData | null>(null);
+  const [accountsList, setAccountsList] = useState<ListedAccount[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const pda = useMemo(() => {
@@ -98,10 +108,30 @@ export default function App() {
     }
   }
 
+  async function refreshAccountsList() {
+    if (!program || !pda) {
+      setAccountsList([]);
+      return;
+    }
+    try {
+      const acct = (await (program.account as any).miniAccount.fetch(pda)) as MiniAccountData;
+      setAccountsList([
+        {
+          pubkey: pda.toBase58(),
+          name: acct.name,
+          balance: acct.balance.toString()
+        }
+      ]);
+    } catch (e: any) {
+      setAccountsList([]);
+    }
+  }
+
   useEffect(() => {
     if (walletPublicKey && program && pda) {
       refreshBalance();
       refreshWalletBalance();
+      refreshAccountsList();
     }
     if (!walletPublicKey) {
       setBalance(null);
@@ -131,13 +161,22 @@ export default function App() {
     }
   }
 
-  async function handleCreateAccount() {
+  async function handleCreateAccount(name: string) {
     if (!program || !pda || !walletPublicKey) return;
     setErrorText("");
+    setCreateModalError("");
     setStatus("Creating account...");
+    setIsCreatingAccount(true);
     try {
+      const existed = await (program.account as any).miniAccount.fetchNullable(pda);
+      if (existed) {
+        setCreateModalError("当前钱包的储蓄账户已存在（同一 PDA 只能创建一次）");
+        setStatus("create_account skipped (already exists)");
+        return;
+      }
+
       await program.methods
-        .createAccount(accountName)
+        .createAccount(name)
         .accounts({
           miniAccount: pda,
           payer: walletPublicKey,
@@ -146,9 +185,15 @@ export default function App() {
         .rpc();
       setStatus("create_account confirmed");
       await refreshBalance();
+      await refreshAccountsList();
+      setShowCreateModal(false);
     } catch (e: any) {
-      setErrorText(e?.message || "Create account failed");
+      const msg = e?.message || "Create account failed";
+      setErrorText(msg);
+      setCreateModalError(msg);
       setStatus("create_account failed");
+    } finally {
+      setIsCreatingAccount(false);
     }
   }
 
@@ -173,6 +218,7 @@ export default function App() {
         .rpc();
       setStatus("deposit confirmed");
       await refreshBalance();
+      await refreshAccountsList();
     } catch (e: any) {
       setErrorText(e?.message || "Deposit failed");
       setStatus("deposit failed");
@@ -200,6 +246,7 @@ export default function App() {
         .rpc();
       setStatus("withdraw confirmed");
       await refreshBalance();
+      await refreshAccountsList();
     } catch (e: any) {
       setErrorText(e?.message || "Withdraw failed");
       setStatus("withdraw failed");
@@ -241,21 +288,21 @@ export default function App() {
 
       <div className="card">
         <h2>账户 & 余额</h2>
-        <div className="field">
-          <label>name</label>
-          <input
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
-            placeholder="account name"
-          />
-        </div>
-
         <div className="row">
-          <button onClick={handleCreateAccount} disabled={!walletPublicKey || !program || !pda}>
+          <button
+            onClick={() => {
+              setCreateModalError("");
+              setShowCreateModal(true);
+            }}
+            disabled={!walletPublicKey || !program || !pda}
+          >
             create_account
           </button>
           <button onClick={refreshBalance} disabled={!walletPublicKey || !program || !pda || isRefreshing}>
             {isRefreshing ? "Refreshing..." : "Refresh"}
+          </button>
+          <button onClick={refreshAccountsList} disabled={!walletPublicKey || !program}>
+            Refresh Accounts List
           </button>
         </div>
 
@@ -274,6 +321,23 @@ export default function App() {
             <span className="muted">SOL</span>
           </div>
         </div>
+      </div>
+
+      <div className="card">
+        <h2>储蓄账户列表</h2>
+        {accountsList.length === 0 ? (
+          <div className="muted">暂无账户（或读取失败）</div>
+        ) : (
+          <div className="accountList">
+            {accountsList.map((acct) => (
+              <div key={acct.pubkey} className="accountItem">
+                <div className="mono">{acct.pubkey}</div>
+                <div>name: {acct.name}</div>
+                <div>balance: {acct.balance} lamports</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -303,6 +367,32 @@ export default function App() {
           </div>
         ) : null}
       </div>
+
+      {showCreateModal ? (
+        <div className="modalMask" onClick={() => setShowCreateModal(false)}>
+          <div className="modalCard" onClick={(e) => e.stopPropagation()}>
+            <h3>创建储蓄账户</h3>
+            <div className="field">
+              <label>账户名称</label>
+              <input
+                value={newAccountName}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                placeholder="alice-savings"
+              />
+            </div>
+            <div className="row">
+              <button
+                onClick={() => handleCreateAccount(newAccountName.trim())}
+                disabled={!newAccountName.trim() || !walletPublicKey || !program || !pda || isCreatingAccount}
+              >
+                {isCreatingAccount ? "创建中..." : "确认创建"}
+              </button>
+              <button onClick={() => setShowCreateModal(false)}>取消</button>
+            </div>
+            {createModalError ? <div className="error">{createModalError}</div> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
