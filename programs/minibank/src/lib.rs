@@ -3,6 +3,8 @@ use anchor_lang::system_program::{transfer, Transfer};
 
 declare_id!("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
 
+const MAX_NAME_LEN: usize = 32;
+
 #[program]
 pub mod minibank {
     use super::*;
@@ -12,7 +14,11 @@ pub mod minibank {
         account_id: u64,
         name: String,
     ) -> Result<()> {
+        require!(!name.is_empty(), ErrorCode::EmptyName);
+        require!(name.len() <= MAX_NAME_LEN, ErrorCode::NameTooLong);
+
         msg!("Creating account for {}", name);
+        ctx.accounts.mini_account.owner = ctx.accounts.payer.key();
         ctx.accounts.mini_account.account_id = account_id;
         ctx.accounts.mini_account.name = name;
         ctx.accounts.mini_account.balance = 0;
@@ -21,9 +27,10 @@ pub mod minibank {
     }
 
     pub fn deposit(ctx: Context<Deposit>, _account_id: u64, amount: u64) -> Result<()> {
+        require!(amount > 0, ErrorCode::InvalidAmount);
         msg!("Depositing {} lamports into account", amount);
 
-        let from_pubkey = ctx.accounts.sender.to_account_info();
+        let from_pubkey = ctx.accounts.owner.to_account_info();
         let to_pubkey = ctx.accounts.mini_account.to_account_info();
 
         let cpi_context = CpiContext::new(
@@ -34,49 +41,49 @@ pub mod minibank {
             },
         );
         transfer(cpi_context, amount)?;
-        ctx.accounts.mini_account.balance += amount; // 更新账户余额
+
+        ctx.accounts.mini_account.balance = ctx
+            .accounts
+            .mini_account
+            .balance
+            .checked_add(amount)
+            .ok_or(ErrorCode::MathOverflow)?;
+
         msg!("Deposit successful");
         msg!("New balance: {}", ctx.accounts.mini_account.balance);
         Ok(())
     }
 
     pub fn withdraw(ctx: Context<Withdraw>, _account_id: u64, amount: u64) -> Result<()> {
+        require!(amount > 0, ErrorCode::InvalidAmount);
         msg!("Withdrawing {} lamports from account", amount);
+
         if ctx.accounts.mini_account.balance < amount {
             return Err(ErrorCode::InsufficientBalance.into());
         }
-        // system_program::transfer的from必须是一个system account，所以直接改lamports
 
-        // let from_pubkey = ctx.accounts.mini_account.to_account_info();
-        // let to_pubkey = ctx.accounts.recipient.to_account_info();
+        let mini_info = ctx.accounts.mini_account.to_account_info();
+        let recipient_info = ctx.accounts.recipient.to_account_info();
 
-        // let seed = to_pubkey.key();
-        // let signer_seeds: &[&[&[u8]]] =
-        //     &[&[b"mini_account", seed.as_ref(), &[ctx.bumps.mini_account]]];
+        require!(mini_info.lamports() >= amount, ErrorCode::InsufficientVaultLamports);
 
-        // let cpi_context = CpiContext::new(
-        //     ctx.accounts.system_program.to_account_info(),
-        //     Transfer {
-        //         from: from_pubkey,
-        //         to: to_pubkey,
-        //     },
-        // )
-        // .with_signer(signer_seeds);
+        let recipient_new = recipient_info
+            .lamports()
+            .checked_add(amount)
+            .ok_or(ErrorCode::MathOverflow)?;
 
-        // transfer(cpi_context, amount)?;
+        // Data account cannot be used as `from` in system_program::transfer,
+        // so we move lamports directly between accounts.
+        **mini_info.try_borrow_mut_lamports()? -= amount;
+        **recipient_info.try_borrow_mut_lamports()? = recipient_new;
 
-        **ctx
+        ctx.accounts.mini_account.balance = ctx
             .accounts
             .mini_account
-            .to_account_info()
-            .try_borrow_mut_lamports()? -= amount;
-        **ctx
-            .accounts
-            .recipient
-            .to_account_info()
-            .try_borrow_mut_lamports()? += amount;
+            .balance
+            .checked_sub(amount)
+            .ok_or(ErrorCode::MathOverflow)?;
 
-        ctx.accounts.mini_account.balance -= amount;
         msg!("Withdrawal successful");
         msg!("New balance: {}", ctx.accounts.mini_account.balance);
         Ok(())
@@ -88,21 +95,21 @@ pub mod minibank {
             ctx.accounts.mini_account.balance == 0,
             ErrorCode::AccountNotEmpty
         );
-        ctx.accounts
-            .mini_account
-            .close(ctx.accounts.recipient.to_account_info())?;
         msg!("Account deleted successfully");
         Ok(())
     }
 }
 
 #[derive(Accounts)]
-pub struct InitializeBank {}
-
-#[derive(Accounts)]
-#[instruction(account_id: u64)] // Accounts用到了instruction参数
+#[instruction(account_id: u64)]
 pub struct CreateAccount<'info> {
-    #[account(init, seeds = [b"mini_account", payer.key().as_ref(), &account_id.to_le_bytes()], bump, payer = payer, space = 8 + std::mem::size_of::<MiniAccount>())]
+    #[account(
+        init,
+        seeds = [b"mini_account", payer.key().as_ref(), &account_id.to_le_bytes()],
+        bump,
+        payer = payer,
+        space = MiniAccount::SPACE
+    )]
     mini_account: Account<'info, MiniAccount>,
     #[account(mut)]
     payer: Signer<'info>,
@@ -113,39 +120,58 @@ pub struct CreateAccount<'info> {
 #[instruction(account_id: u64)]
 pub struct Deposit<'info> {
     #[account(mut)]
-    sender: Signer<'info>,
-    #[account(mut, seeds = [b"mini_account", sender.key().as_ref(), &account_id.to_le_bytes()], bump)]
+    owner: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"mini_account", owner.key().as_ref(), &account_id.to_le_bytes()],
+        bump,
+        has_one = owner
+    )]
     mini_account: Account<'info, MiniAccount>,
     system_program: Program<'info, System>,
 }
+
 #[derive(Accounts)]
 #[instruction(account_id: u64)]
 pub struct Withdraw<'info> {
-    #[account(mut, seeds = [b"mini_account", recipient.key().as_ref(), &account_id.to_le_bytes()], bump)]
+    #[account(
+        mut,
+        seeds = [b"mini_account", owner.key().as_ref(), &account_id.to_le_bytes()],
+        bump,
+        has_one = owner
+    )]
     mini_account: Account<'info, MiniAccount>,
-    #[account(mut)]
+    owner: Signer<'info>,
+    #[account(mut, constraint = recipient.key() == owner.key() @ ErrorCode::InvalidRecipient)]
     recipient: SystemAccount<'info>,
-    system_program: Program<'info, System>,
 }
+
 #[derive(Accounts)]
 #[instruction(account_id: u64)]
 pub struct DeleteAccount<'info> {
-    #[account(mut, seeds = [b"mini_account", recipient.key().as_ref(), &account_id.to_le_bytes()], bump, close = recipient)]
+    #[account(
+        mut,
+        seeds = [b"mini_account", owner.key().as_ref(), &account_id.to_le_bytes()],
+        bump,
+        has_one = owner,
+        close = recipient
+    )]
     mini_account: Account<'info, MiniAccount>,
-    #[account(mut)]
+    owner: Signer<'info>,
+    #[account(mut, constraint = recipient.key() == owner.key() @ ErrorCode::InvalidRecipient)]
     recipient: SystemAccount<'info>,
-    system_program: Program<'info, System>,
 }
-/// 包含银行账户的配置信息
-#[account]
-pub struct BankConfig {}
 
-// 这种储蓄账户必须是PDA，否则无法转出余额
 #[account]
 pub struct MiniAccount {
-    name: String,    // 账户名称
-    balance: u64,    // 账户余额(solana lamports)
-    account_id: u64, // 账户ID
+    owner: Pubkey,
+    name: String,
+    balance: u64,
+    account_id: u64,
+}
+
+impl MiniAccount {
+    pub const SPACE: usize = 8 + 32 + 4 + MAX_NAME_LEN + 8 + 8;
 }
 
 #[error_code]
@@ -154,4 +180,16 @@ pub enum ErrorCode {
     InsufficientBalance,
     #[msg("Account not empty")]
     AccountNotEmpty,
+    #[msg("Invalid amount")]
+    InvalidAmount,
+    #[msg("Math overflow")]
+    MathOverflow,
+    #[msg("Name cannot be empty")]
+    EmptyName,
+    #[msg("Name is too long")]
+    NameTooLong,
+    #[msg("Recipient must match account owner")]
+    InvalidRecipient,
+    #[msg("Mini account does not have enough lamports")]
+    InsufficientVaultLamports,
 }
