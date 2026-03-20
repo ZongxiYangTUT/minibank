@@ -9,226 +9,98 @@
   "instructions": [
     {
       "name": "create_account",
-      "discriminator": [
-        99,
-        20,
-        130,
-        119,
-        196,
-        235,
-        131,
-        149
-      ],
+      "discriminator": [99, 20, 130, 119, 196, 235, 131, 149],
       "accounts": [
         {
           "name": "mini_account",
           "writable": true,
           "pda": {
             "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  105,
-                  110,
-                  105,
-                  95,
-                  97,
-                  99,
-                  99,
-                  111,
-                  117,
-                  110,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "payer"
-              },
-              {
-                "kind": "arg",
-                "path": "account_id"
-              }
+              { "kind": "const", "value": [109, 105, 110, 105, 95, 97, 99, 99, 111, 117, 110, 116] },
+              { "kind": "account", "path": "payer" },
+              { "kind": "arg", "path": "account_id" }
             ]
           }
         },
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
+        { "name": "payer", "writable": true, "signer": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
       ],
       "args": [
-        {
-          "name": "account_id",
-          "type": "u64"
-        },
-        {
-          "name": "name",
-          "type": "string"
-        }
+        { "name": "account_id", "type": "u64" },
+        { "name": "name", "type": "string" }
       ]
     },
     {
-      "name": "deposit",
-      "discriminator": [
-        242,
-        35,
-        198,
-        137,
-        82,
-        225,
-        242,
-        182
-      ],
+      "name": "delete_account",
+      "discriminator": [124, 6, 214, 255, 144, 7, 159, 251],
       "accounts": [
-        {
-          "name": "sender",
-          "writable": true,
-          "signer": true
-        },
         {
           "name": "mini_account",
           "writable": true,
           "pda": {
             "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  105,
-                  110,
-                  105,
-                  95,
-                  97,
-                  99,
-                  99,
-                  111,
-                  117,
-                  110,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "sender"
-              },
-              {
-                "kind": "arg",
-                "path": "account_id"
-              }
+              { "kind": "const", "value": [109, 105, 110, 105, 95, 97, 99, 99, 111, 117, 110, 116] },
+              { "kind": "account", "path": "recipient" },
+              { "kind": "arg", "path": "account_id" }
             ]
           }
         },
+        { "name": "recipient", "writable": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [{ "name": "_account_id", "type": "u64" }]
+    },
+    {
+      "name": "deposit",
+      "discriminator": [242, 35, 198, 137, 82, 225, 242, 182],
+      "accounts": [
+        { "name": "sender", "writable": true, "signer": true },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
+          "name": "mini_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [109, 105, 110, 105, 95, 97, 99, 99, 111, 117, 110, 116] },
+              { "kind": "account", "path": "sender" },
+              { "kind": "arg", "path": "account_id" }
+            ]
+          }
+        },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
       ],
       "args": [
-        {
-          "name": "_account_id",
-          "type": "u64"
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        }
+        { "name": "_account_id", "type": "u64" },
+        { "name": "amount", "type": "u64" }
       ]
     },
     {
       "name": "withdraw",
-      "discriminator": [
-        183,
-        18,
-        70,
-        156,
-        148,
-        109,
-        161,
-        34
-      ],
+      "discriminator": [183, 18, 70, 156, 148, 109, 161, 34],
       "accounts": [
         {
           "name": "mini_account",
           "writable": true,
           "pda": {
             "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  105,
-                  110,
-                  105,
-                  95,
-                  97,
-                  99,
-                  99,
-                  111,
-                  117,
-                  110,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "recipient"
-              },
-              {
-                "kind": "arg",
-                "path": "account_id"
-              }
+              { "kind": "const", "value": [109, 105, 110, 105, 95, 97, 99, 99, 111, 117, 110, 116] },
+              { "kind": "account", "path": "recipient" },
+              { "kind": "arg", "path": "account_id" }
             ]
           }
         },
-        {
-          "name": "recipient",
-          "writable": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
+        { "name": "recipient", "writable": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
       ],
       "args": [
-        {
-          "name": "_account_id",
-          "type": "u64"
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        }
+        { "name": "_account_id", "type": "u64" },
+        { "name": "amount", "type": "u64" }
       ]
     }
   ],
-  "accounts": [
-    {
-      "name": "MiniAccount",
-      "discriminator": [
-        37,
-        85,
-        66,
-        157,
-        28,
-        41,
-        159,
-        33
-      ]
-    }
-  ],
+  "accounts": [{ "name": "MiniAccount", "discriminator": [37, 85, 66, 157, 28, 41, 159, 33] }],
   "errors": [
-    {
-      "code": 6000,
-      "name": "InsufficientBalance",
-      "msg": "Insufficient balance"
-    }
+    { "code": 6000, "name": "InsufficientBalance", "msg": "Insufficient balance" },
+    { "code": 6001, "name": "AccountNotEmpty", "msg": "Account not empty" }
   ],
   "types": [
     {
@@ -236,18 +108,9 @@
       "type": {
         "kind": "struct",
         "fields": [
-          {
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "name": "balance",
-            "type": "u64"
-          },
-          {
-            "name": "account_id",
-            "type": "u64"
-          }
+          { "name": "name", "type": "string" },
+          { "name": "balance", "type": "u64" },
+          { "name": "account_id", "type": "u64" }
         ]
       }
     }

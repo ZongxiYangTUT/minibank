@@ -57,12 +57,14 @@ export default function App() {
   const [status, setStatus] = useState<string>("");
   const [errorText, setErrorText] = useState<string>("");
 
-  const [amountSol, setAmountSol] = useState<string>("0.1");
+  const [amountByAccountId, setAmountByAccountId] = useState<Record<string, string>>({});
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [newAccountName, setNewAccountName] = useState<string>("alice-savings");
   const [newAccountId, setNewAccountId] = useState<string>("1");
   const [createModalError, setCreateModalError] = useState<string>("");
   const [isCreatingAccount, setIsCreatingAccount] = useState<boolean>(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string>("");
 
   const [balance, setBalance] = useState<MiniAccountData | null>(null);
   const [accountsList, setAccountsList] = useState<ListedAccount[]>([]);
@@ -260,8 +262,18 @@ export default function App() {
     }
   }
 
-  async function handleDeposit() {
-    if (!program || !pda || !walletPublicKey || !selectedAccountIdBn) return;
+  async function handleDeposit(accountIdStr: string, amountSol: string) {
+    if (!program || !walletPublicKey) return;
+    const accountIdBn = parseU64ToBN(accountIdStr);
+    if (!accountIdBn || accountIdBn.lte(new BN(0))) return;
+    const pdaForOp = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(accountIdBn)
+      ],
+      programId
+    )[0];
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
       setErrorText("amount must be > 0");
@@ -272,10 +284,10 @@ export default function App() {
     setStatus("Depositing...");
     try {
       await program.methods
-        .deposit(selectedAccountIdBn, new BN(lamports.toString()))
+        .deposit(accountIdBn, new BN(lamports.toString()))
         .accounts({
           sender: walletPublicKey,
-          miniAccount: pda,
+          miniAccount: pdaForOp,
           systemProgram: SystemProgram.programId
         })
         .rpc();
@@ -288,8 +300,18 @@ export default function App() {
     }
   }
 
-  async function handleWithdraw() {
-    if (!program || !pda || !walletPublicKey || !selectedAccountIdBn) return;
+  async function handleWithdraw(accountIdStr: string, amountSol: string) {
+    if (!program || !walletPublicKey) return;
+    const accountIdBn = parseU64ToBN(accountIdStr);
+    if (!accountIdBn || accountIdBn.lte(new BN(0))) return;
+    const pdaForOp = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(accountIdBn)
+      ],
+      programId
+    )[0];
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
       setErrorText("amount must be > 0");
@@ -300,9 +322,9 @@ export default function App() {
     setStatus("Withdrawing...");
     try {
       await program.methods
-        .withdraw(selectedAccountIdBn, new BN(lamports.toString()))
+        .withdraw(accountIdBn, new BN(lamports.toString()))
         .accounts({
-          miniAccount: pda,
+          miniAccount: pdaForOp,
           recipient: walletPublicKey,
           systemProgram: SystemProgram.programId
         })
@@ -313,6 +335,59 @@ export default function App() {
     } catch (e: any) {
       setErrorText(e?.message || "Withdraw failed");
       setStatus("withdraw failed");
+    }
+  }
+
+  async function handleDeleteAccount(accountIdStr?: string) {
+    if (!program || !walletPublicKey) return;
+    const idStr = accountIdStr ?? selectedAccountId;
+    const accountIdBn = parseU64ToBN(idStr);
+    if (!accountIdBn || accountIdBn.lte(new BN(0))) {
+      setErrorText("account_id 非法");
+      return;
+    }
+
+    const pdaForDelete = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(accountIdBn)
+      ],
+      programId
+    )[0];
+
+    setErrorText("");
+    setDeleteError("");
+    setStatus(`Deleting account ${idStr}...`);
+    setIsDeletingAccount(true);
+    try {
+      await program.methods
+        .deleteAccount(accountIdBn)
+        .accounts({
+          miniAccount: pdaForDelete,
+          recipient: walletPublicKey,
+          systemProgram: SystemProgram.programId
+        })
+        .rpc();
+
+      setStatus(`delete_account confirmed (account_id=${idStr})`);
+      await refreshAccountsList();
+      await refreshWalletBalance();
+
+      if (idStr === selectedAccountId) {
+        setBalance(null);
+      }
+    } catch (e: any) {
+      const raw = e?.message || "Delete account failed";
+      const friendly =
+        raw.includes("AccountNotEmpty") || raw.includes("Account not empty")
+          ? "关闭失败：账户余额不为 0，请先把该账户提到 0 再关闭"
+          : raw;
+      setErrorText(friendly);
+      setDeleteError(friendly);
+      setStatus("delete_account failed");
+    } finally {
+      setIsDeletingAccount(false);
     }
   }
 
@@ -413,27 +488,50 @@ export default function App() {
                 <div>account_id: {acct.accountId}</div>
                 <div>name: {acct.name}</div>
                 <div>balance: {acct.balance} lamports</div>
+                <div className="field">
+                  <label>amount (SOL)</label>
+                  <input
+                    value={amountByAccountId[acct.accountId] ?? "0.1"}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setAmountByAccountId((prev) => ({ ...prev, [acct.accountId]: value }));
+                    }}
+                    placeholder="0.1"
+                  />
+                </div>
+                <div className="row">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
+                    }}
+                  >
+                    deposit
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
+                    }}
+                  >
+                    withdraw
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteAccount(acct.accountId);
+                    }}
+                    disabled={isDeletingAccount}
+                  >
+                    关闭账户
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
-      </div>
-
-      <div className="card">
-        <h2>存取款</h2>
-        <div className="field">
-          <label>amount (SOL)</label>
-          <input value={amountSol} onChange={(e) => setAmountSol(e.target.value)} placeholder="0.1" />
-        </div>
-
-        <div className="row">
-          <button onClick={handleDeposit} disabled={!walletPublicKey || !program || !pda}>
-            deposit
-          </button>
-          <button onClick={handleWithdraw} disabled={!walletPublicKey || !program || !pda}>
-            withdraw
-          </button>
-        </div>
+        {deleteError ? <div className="error">{deleteError}</div> : null}
       </div>
 
       <div className="status">

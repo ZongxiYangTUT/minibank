@@ -81,6 +81,19 @@ pub mod minibank {
         msg!("New balance: {}", ctx.accounts.mini_account.balance);
         Ok(())
     }
+
+    pub fn delete_account(ctx: Context<DeleteAccount>, _account_id: u64) -> Result<()> {
+        msg!("Deleting account");
+        require!(
+            ctx.accounts.mini_account.balance == 0,
+            ErrorCode::AccountNotEmpty
+        );
+        ctx.accounts
+            .mini_account
+            .close(ctx.accounts.recipient.to_account_info())?;
+        msg!("Account deleted successfully");
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -114,6 +127,15 @@ pub struct Withdraw<'info> {
     recipient: SystemAccount<'info>,
     system_program: Program<'info, System>,
 }
+#[derive(Accounts)]
+#[instruction(account_id: u64)]
+pub struct DeleteAccount<'info> {
+    #[account(mut, seeds = [b"mini_account", recipient.key().as_ref(), &account_id.to_le_bytes()], bump, close = recipient)]
+    mini_account: Account<'info, MiniAccount>,
+    #[account(mut)]
+    recipient: SystemAccount<'info>,
+    system_program: Program<'info, System>,
+}
 /// 包含银行账户的配置信息
 #[account]
 pub struct BankConfig {}
@@ -130,4 +152,6 @@ pub struct MiniAccount {
 pub enum ErrorCode {
     #[msg("Insufficient balance")]
     InsufficientBalance,
+    #[msg("Account not empty")]
+    AccountNotEmpty,
 }
