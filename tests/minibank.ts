@@ -8,10 +8,16 @@ describe("minibank", () => {
 
   const program = anchor.workspace.minibank as Program<Minibank>;
   const provider = anchor.getProvider() as anchor.AnchorProvider;
-  const payerKp = (provider.wallet as any).payer as anchor.web3.Keypair;
-  const owner = payerKp.publicKey;
+  const owner = provider.wallet.publicKey;
 
   const toLe8 = (n: number) => new anchor.BN(n).toArrayLike(Buffer, "le", 8);
+
+  const getUserStatsPda = (ownerPk: anchor.web3.PublicKey) => {
+    return anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("user_stats"), ownerPk.toBuffer()],
+      program.programId
+    );
+  };
 
   const getMiniAccountPda = (ownerPk: anchor.web3.PublicKey, accountId: number) => {
     return anchor.web3.PublicKey.findProgramAddressSync(
@@ -20,35 +26,41 @@ describe("minibank", () => {
     );
   };
 
-  const findUnusedAccountId = async () => {
-    let accountId = Math.floor(Math.random() * 1_000_000_000);
-    for (let i = 0; i < 100; i++) {
-      const candidate = accountId + i;
-      const [pda] = getMiniAccountPda(owner, candidate);
-      const exists = await program.account.miniAccount.fetchNullable(pda);
-      if (!exists) return candidate;
+  const ensureUserStats = async () => {
+    const [userStatsPda] = getUserStatsPda(owner);
+    const exists = await program.account.userStats.fetchNullable(userStatsPda);
+    if (!exists) {
+      await program.methods
+        .initUserStats()
+        .accountsPartial({
+          userStats: userStatsPda,
+          owner,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
     }
-    throw new Error("failed to find unused account_id");
   };
 
   const createAccount = async (name: string) => {
-    const accountId = await findUnusedAccountId();
+    await ensureUserStats();
+    const [userStatsPda] = getUserStatsPda(owner);
+    const stats = await program.account.userStats.fetch(userStatsPda);
+    const accountId = stats.nextAccountId.toNumber();
     const [miniAccountPda] = getMiniAccountPda(owner, accountId);
 
+    // 让 Anchor 根据 IDL 解析 PDA（与手动传入的 PDA 等价，避免账户顺序/编码问题）
     await program.methods
-      .createAccount(new anchor.BN(accountId), name)
-      .accountsPartial({
-        miniAccount: miniAccountPda,
+      .createAccount(name)
+      .accounts({
         payer: owner,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
-      .signers([payerKp])
       .rpc();
 
     return { accountId, miniAccountPda };
   };
 
-  it("create_account works with PDA(account_id)", async () => {
+  it("create_account works with sequential account_id from UserStats", async () => {
     const { accountId, miniAccountPda } = await createAccount("alice-savings");
 
     const created = await program.account.miniAccount.fetch(miniAccountPda);
@@ -68,7 +80,6 @@ describe("minibank", () => {
         miniAccount: miniAccountPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
-      .signers([payerKp])
       .rpc();
 
     const afterDeposit = await program.account.miniAccount.fetch(miniAccountPda);
@@ -82,7 +93,6 @@ describe("minibank", () => {
         recipient: owner,
         miniAccount: miniAccountPda,
       })
-      .signers([payerKp])
       .rpc();
 
     const afterWithdraw = await program.account.miniAccount.fetch(miniAccountPda);
@@ -103,7 +113,6 @@ describe("minibank", () => {
           recipient: owner,
           miniAccount: miniAccountPda,
         })
-        .signers([payerKp])
         .rpc();
     } catch {
       threw = true;
@@ -122,7 +131,6 @@ describe("minibank", () => {
         miniAccount: miniAccountPda,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
-      .signers([payerKp])
       .rpc();
 
     let deleteFailed = false;
@@ -134,7 +142,6 @@ describe("minibank", () => {
           recipient: owner,
           miniAccount: miniAccountPda,
         })
-        .signers([payerKp])
         .rpc();
     } catch {
       deleteFailed = true;
@@ -148,7 +155,6 @@ describe("minibank", () => {
         recipient: owner,
         miniAccount: miniAccountPda,
       })
-      .signers([payerKp])
       .rpc();
 
     await program.methods
@@ -158,7 +164,6 @@ describe("minibank", () => {
         recipient: owner,
         miniAccount: miniAccountPda,
       })
-      .signers([payerKp])
       .rpc();
 
     const deleted = await program.account.miniAccount.fetchNullable(miniAccountPda);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Program, BN, AnchorProvider } from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,7 @@ import idl from "./idl/minibank.json";
 
 const programId = new PublicKey("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
 const accountSeed = "mini_account";
+const userStatsSeed = "user_stats";
 
 type MiniAccountData = {
   name: string;
@@ -56,23 +57,47 @@ export default function App() {
   const walletPublicKey = localKeypair?.publicKey ?? null;
   const [walletSol, setWalletSol] = useState<string>("0.0");
 
-  const [status, setStatus] = useState<string>("");
-  const [errorText, setErrorText] = useState<string>("");
+  type StatusTone = "default" | "error";
+  const [statusLine, setStatusLine] = useState<{ text: string; tone: StatusTone }>({ text: "", tone: "default" });
+
+  /** 复制地址后延迟恢复状态的定时器，需在其它提示前清掉，否则会盖住错误信息 */
+  const copyRestoreTimerRef = useRef<number | null>(null);
+  /** 用户操作触发的拉取（会改状态栏/刷新按钮）：与 invalidate 共用，用于丢弃过期请求 */
+  const balanceFetchEpochRef = useRef(0);
+  /** 仅 useEffect 静默拉取：单独计数，避免与上一条并存时把 interaction 的 epoch 顶掉，导致存/取成功后永远不执行 setAppStatus */
+  const silentFetchGenRef = useRef(0);
+
+  function invalidatePendingBalanceFetch() {
+    balanceFetchEpochRef.current += 1;
+    silentFetchGenRef.current += 1;
+    setIsRefreshing(false);
+  }
+
+  /** 文案与色调均未变时不 setState，避免「同一条提示」因连续两次 setState 仍触发重渲染而闪烁 */
+  function setAppStatus(text: string, tone: StatusTone = "default") {
+    if (copyRestoreTimerRef.current) {
+      clearTimeout(copyRestoreTimerRef.current);
+      copyRestoreTimerRef.current = null;
+    }
+    setStatusLine((prev) => (prev.text === text && prev.tone === tone ? prev : { text, tone }));
+  }
 
   const [amountByAccountId, setAmountByAccountId] = useState<Record<string, string>>({});
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [newAccountName, setNewAccountName] = useState<string>("alice-savings");
-  const [newAccountId, setNewAccountId] = useState<string>("1");
-  const [createModalError, setCreateModalError] = useState<string>("");
   const [isCreatingAccount, setIsCreatingAccount] = useState<boolean>(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState<boolean>(false);
-  const [deleteError, setDeleteError] = useState<string>("");
 
   const [balance, setBalance] = useState<MiniAccountData | null>(null);
+  const balanceRef = useRef<MiniAccountData | null>(null);
+  balanceRef.current = balance;
   const [accountsList, setAccountsList] = useState<ListedAccount[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const [selectedAccountId, setSelectedAccountId] = useState<string>("1");
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("0");
+
+  /** 仅当按下与点击都发生在遮罩本身时才关闭，避免从输入框拖选文字到遮罩外松开时误关弹窗 */
+  const createModalBackdropMouseDownRef = useRef(false);
 
   function friendlyError(e: any): string {
     const raw = e?.message || "";
@@ -81,6 +106,15 @@ export default function App() {
     if (raw.includes("already in use") || raw.includes("already exists")) return t("accountExists");
     if (raw.includes("InsufficientBalance") || raw.includes("Insufficient balance")) {
       return i18n.language === "zh" ? "余额不足" : "Insufficient balance";
+    }
+    if (raw.includes("InsufficientVaultLamports") || raw.includes("does not have enough lamports")) {
+      return i18n.language === "zh" ? "金库 lamports 不足" : "Insufficient vault lamports";
+    }
+    if (raw.includes("InvalidRecipient") || raw.includes("Recipient must match")) {
+      return i18n.language === "zh" ? "收款方必须是账户所有者" : "Recipient must be account owner";
+    }
+    if (raw.includes("InvalidAccountId") || raw.includes("Account id does not match")) {
+      return t("invalidAccountId");
     }
     return raw || t("txFailed");
   }
@@ -96,6 +130,13 @@ export default function App() {
 
   function accountIdToLeBytes(accountIdBn: BN): Uint8Array {
     return accountIdBn.toArrayLike(Buffer, "le", 8);
+  }
+
+  function getUserStatsPda(pubkey: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync(
+      [new TextEncoder().encode(userStatsSeed), pubkey.toBuffer()],
+      programId
+    )[0];
   }
 
   const pda = useMemo(() => {
@@ -129,27 +170,62 @@ export default function App() {
     return new Program(idl as any, provider as any);
   }, [connection, walletPublicKey, localKeypair]);
 
-  async function refreshBalance() {
-    setErrorText("");
-    if (!program || !pda) return;
-    setIsRefreshing(true);
+  /**
+   * @param accountIdOverride 若传入，则按该 account_id 拉取余额（避免 setState 异步导致仍用旧的 selectedAccountId）
+   * @param opts.updateStatus 为 false 时不改写底部状态文案（用于紧跟在存/取后的 pda effect，避免重复「余额已刷新」）
+   * @param opts.showRefreshing 为 false 时不切换「刷新中」按钮状态（避免与主流程重复闪烁）
+   */
+  async function refreshBalance(
+    accountIdOverride?: string,
+    opts?: { updateStatus?: boolean; showRefreshing?: boolean }
+  ) {
+    const updateStatus = opts?.updateStatus !== false;
+    const showRefreshing = opts?.showRefreshing !== false;
+    const idStr = accountIdOverride ?? selectedAccountId;
+    const accountIdBn = parseU64ToBN(idStr);
+    if (!program || !walletPublicKey || !accountIdBn) return;
+    const pdaFetch = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(accountIdBn)
+      ],
+      programId
+    )[0];
+    const isSilent = !updateStatus && !showRefreshing;
+    let myInteractionEpoch = 0;
+    let mySilentGen = 0;
+    if (isSilent) {
+      silentFetchGenRef.current += 1;
+      mySilentGen = silentFetchGenRef.current;
+    } else {
+      balanceFetchEpochRef.current += 1;
+      myInteractionEpoch = balanceFetchEpochRef.current;
+    }
+    if (showRefreshing) setIsRefreshing(true);
     try {
-      const acct = (await (program.account as any).miniAccount.fetch(pda)) as MiniAccountData;
+      const acct = (await (program.account as any).miniAccount.fetch(pdaFetch)) as MiniAccountData;
+      if (isSilent) {
+        if (mySilentGen !== silentFetchGenRef.current) return;
+      } else if (myInteractionEpoch !== balanceFetchEpochRef.current) return;
       setBalance(acct);
-      setStatus(t("balanceRefreshed"));
+      if (updateStatus) setAppStatus(t("balanceRefreshed"), "default");
     } catch (e: any) {
+      if (isSilent) {
+        if (mySilentGen !== silentFetchGenRef.current) return;
+      } else if (myInteractionEpoch !== balanceFetchEpochRef.current) return;
       setBalance(null);
-      setStatus(t("accountNotFound"));
+      if (updateStatus) setAppStatus(t("accountNotFound"), "error");
     } finally {
-      setIsRefreshing(false);
+      if (showRefreshing && myInteractionEpoch === balanceFetchEpochRef.current) setIsRefreshing(false);
     }
   }
 
-  async function refreshAccountsList() {
+  async function refreshAccountsList(): Promise<ListedAccount[]> {
     try {
       if (!program || !walletPublicKey) {
         setAccountsList([]);
-        return;
+        return [];
       }
 
       const allAccounts = await (program.account as any).miniAccount.all();
@@ -181,23 +257,25 @@ export default function App() {
         });
       }
 
-      // 简单排序：按 account_id 升序展示
       listed.sort((a, b) => Number(a.accountId) - Number(b.accountId));
       setAccountsList(listed);
+      return listed;
     } catch (e: any) {
       setAccountsList([]);
+      return [];
     }
   }
 
   useEffect(() => {
     if (walletPublicKey && program && pda) {
-      refreshBalance();
+      /* 仅同步链上数据到界面，绝不写底部状态栏：否则任意晚到的 fetch 都会把「余额已刷新」盖在错误提示上 */
+      void refreshBalance(undefined, { updateStatus: false, showRefreshing: false });
       refreshWalletBalance();
       refreshAccountsList();
     }
     if (!walletPublicKey) {
       setBalance(null);
-      setStatus(t("walletDisconnected"));
+      setAppStatus(t("walletDisconnected"), "error");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletPublicKey, program, pda]);
@@ -208,68 +286,76 @@ export default function App() {
     setWalletSol(lamportsToSolStr(BigInt(lamports)));
   }
 
+  async function ensureUserStatsInitialized() {
+    if (!program || !walletPublicKey || !localKeypair) return;
+    const userStatsPda = getUserStatsPda(walletPublicKey);
+    const exists = await (program.account as any).userStats.fetchNullable(userStatsPda);
+    if (exists) return;
+    await program.methods
+      .initUserStats()
+      .accounts({
+        userStats: userStatsPda,
+        owner: walletPublicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
   async function handleAirdrop() {
     if (!walletPublicKey) return;
-    setErrorText("");
-    setStatus(t("airdrop"));
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("airdrop"), "default");
     try {
       const sig = await connection.requestAirdrop(walletPublicKey, 1_000_000_000);
       await connection.confirmTransaction(sig, "confirmed");
-      setStatus(t("airdropConfirmed"));
+      setAppStatus(t("airdropConfirmed"), "default");
       await refreshWalletBalance();
     } catch (e: any) {
-      setErrorText(friendlyError(e));
-      setStatus(t("airdropFailed"));
+      setAppStatus(`${t("airdropFailed")} — ${friendlyError(e)}`, "error");
     }
   }
 
-  async function handleCreateAccount(name: string, accountIdStr: string) {
+  async function handleCreateAccount(name: string) {
     if (!program || !walletPublicKey) return;
-    const accountIdBn = parseU64ToBN(accountIdStr);
-    if (!accountIdBn || accountIdBn.lte(new BN(0))) {
-      setCreateModalError("account_id 必须是大于等于 1 的整数");
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setAppStatus(i18n.language.startsWith("zh") ? "名称不能为空" : "Name cannot be empty", "error");
       return;
     }
 
-    const pdaForNew = PublicKey.findProgramAddressSync(
-      [
-        new TextEncoder().encode(accountSeed),
-        walletPublicKey.toBuffer(),
-        accountIdToLeBytes(accountIdBn)
-      ],
-      programId
-    )[0];
-
-    setErrorText("");
-    setCreateModalError("");
-    setStatus("Creating account...");
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("statusCreating"), "default");
     setIsCreatingAccount(true);
     try {
-      const existed = await (program.account as any).miniAccount.fetchNullable(pdaForNew);
-      if (existed) {
-        setCreateModalError(t("accountExists"));
-        setStatus("create_account skipped (already exists)");
-        return;
-      }
+      await ensureUserStatsInitialized();
+      const userStatsPda = getUserStatsPda(walletPublicKey);
+      const stats = await (program.account as any).userStats.fetch(userStatsPda);
+      const nextIdBn: BN = stats.nextAccountId;
+      const pdaForNew = PublicKey.findProgramAddressSync(
+        [
+          new TextEncoder().encode(accountSeed),
+          walletPublicKey.toBuffer(),
+          accountIdToLeBytes(nextIdBn)
+        ],
+        programId
+      )[0];
 
       await program.methods
-        .createAccount(accountIdBn, name)
+        .createAccount(trimmed)
         .accounts({
+          userStats: userStatsPda,
           miniAccount: pdaForNew,
           payer: walletPublicKey,
           systemProgram: SystemProgram.programId
         })
         .rpc();
-      setStatus("create_account confirmed");
-      setSelectedAccountId(accountIdStr);
-      await refreshBalance();
+      const newIdStr = nextIdBn.toString();
+      setSelectedAccountId(newIdStr);
+      await refreshBalance(newIdStr);
       await refreshAccountsList();
       setShowCreateModal(false);
     } catch (e: any) {
-      const msg = friendlyError(e);
-      setErrorText(msg);
-      setCreateModalError(msg);
-      setStatus("create_account failed");
+      setAppStatus(friendlyError(e), "error");
     } finally {
       setIsCreatingAccount(false);
     }
@@ -278,7 +364,7 @@ export default function App() {
   async function handleDeposit(accountIdStr: string, amountSol: string) {
     if (!program || !walletPublicKey) return;
     const accountIdBn = parseU64ToBN(accountIdStr);
-    if (!accountIdBn || accountIdBn.lte(new BN(0))) return;
+    if (!accountIdBn) return;
     const pdaForOp = PublicKey.findProgramAddressSync(
       [
         new TextEncoder().encode(accountSeed),
@@ -289,34 +375,33 @@ export default function App() {
     )[0];
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
-      setErrorText(t("invalidAmount"));
+      setAppStatus(t("invalidAmount"), "error");
       return;
     }
 
-    setErrorText("");
-    setStatus("Depositing...");
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("statusDepositing"), "default");
     try {
       await program.methods
         .deposit(accountIdBn, new BN(lamports.toString()))
         .accounts({
-          sender: walletPublicKey,
+          owner: walletPublicKey,
           miniAccount: pdaForOp,
           systemProgram: SystemProgram.programId
         })
         .rpc();
-      setStatus("deposit confirmed");
-      await refreshBalance();
+      setSelectedAccountId(accountIdStr);
+      await refreshBalance(accountIdStr);
       await refreshAccountsList();
     } catch (e: any) {
-      setErrorText(friendlyError(e));
-      setStatus("deposit failed");
+      setAppStatus(friendlyError(e), "error");
     }
   }
 
   async function handleWithdraw(accountIdStr: string, amountSol: string) {
     if (!program || !walletPublicKey) return;
     const accountIdBn = parseU64ToBN(accountIdStr);
-    if (!accountIdBn || accountIdBn.lte(new BN(0))) return;
+    if (!accountIdBn) return;
     const pdaForOp = PublicKey.findProgramAddressSync(
       [
         new TextEncoder().encode(accountSeed),
@@ -327,36 +412,36 @@ export default function App() {
     )[0];
     const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
-      setErrorText(t("invalidAmount"));
+      setAppStatus(t("invalidAmount"), "error");
       return;
     }
 
-    setErrorText("");
-    setStatus("Withdrawing...");
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("statusWithdrawing"), "default");
     try {
       await program.methods
         .withdraw(accountIdBn, new BN(lamports.toString()))
         .accounts({
           miniAccount: pdaForOp,
-          recipient: walletPublicKey,
-          systemProgram: SystemProgram.programId
+          owner: walletPublicKey,
+          recipient: walletPublicKey
         })
         .rpc();
-      setStatus("withdraw confirmed");
-      await refreshBalance();
+      setSelectedAccountId(accountIdStr);
+      await refreshBalance(accountIdStr);
       await refreshAccountsList();
     } catch (e: any) {
-      setErrorText(friendlyError(e));
-      setStatus("withdraw failed");
+      setAppStatus(friendlyError(e), "error");
     }
   }
 
   async function handleDeleteAccount(accountIdStr?: string) {
     if (!program || !walletPublicKey) return;
     const idStr = accountIdStr ?? selectedAccountId;
+    const prevSelected = selectedAccountId;
     const accountIdBn = parseU64ToBN(idStr);
-    if (!accountIdBn || accountIdBn.lte(new BN(0))) {
-      setErrorText(t("invalidAccountId"));
+    if (!accountIdBn) {
+      setAppStatus(t("invalidAccountId"), "error");
       return;
     }
 
@@ -369,36 +454,38 @@ export default function App() {
       programId
     )[0];
 
-    setErrorText("");
-    setDeleteError("");
-    setStatus(`Deleting account ${idStr}...`);
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("deletingAccount"), "default");
     setIsDeletingAccount(true);
     try {
       await program.methods
         .deleteAccount(accountIdBn)
         .accounts({
           miniAccount: pdaForDelete,
-          recipient: walletPublicKey,
-          systemProgram: SystemProgram.programId
+          owner: walletPublicKey,
+          recipient: walletPublicKey
         })
         .rpc();
 
-      setStatus(`delete_account confirmed (account_id=${idStr})`);
-      await refreshAccountsList();
+      const listed = await refreshAccountsList();
       await refreshWalletBalance();
 
-      if (idStr === selectedAccountId) {
+      if (listed.length === 0) {
+        setSelectedAccountId("0");
         setBalance(null);
+        setAppStatus(t("accountNotFound"), "error");
+      } else if (idStr === prevSelected) {
+        const nextId = listed[0].accountId;
+        setSelectedAccountId(nextId);
+        await refreshBalance(nextId);
+      } else {
+        setAppStatus(t("accountClosed"), "default");
       }
     } catch (e: any) {
       const raw = e?.message || "Delete account failed";
       const friendly =
-        raw.includes("AccountNotEmpty") || raw.includes("Account not empty")
-          ? "关闭失败：账户余额不为 0，请先把该账户提到 0 再关闭"
-          : raw;
-      setErrorText(friendly);
-      setDeleteError(friendly);
-      setStatus("delete_account failed");
+        raw.includes("AccountNotEmpty") || raw.includes("Account not empty") ? t("deleteNonZero") : raw;
+      setAppStatus(friendly, "error");
     } finally {
       setIsDeletingAccount(false);
     }
@@ -417,10 +504,13 @@ export default function App() {
   async function copyToClipboard(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      setStatus(t("copied"));
-      setTimeout(() => setStatus(""), 1500);
+      setAppStatus(t("copied"), "default");
+      copyRestoreTimerRef.current = window.setTimeout(() => {
+        copyRestoreTimerRef.current = null;
+        setAppStatus(balanceRef.current ? t("balanceRefreshed") : t("statusIdle"), "default");
+      }, 1500);
     } catch {
-      setStatus(t("copyFailed"));
+      setAppStatus(t("copyFailed"), "error");
     }
   }
 
@@ -501,9 +591,8 @@ export default function App() {
       </header>
 
       {walletPublicKey && (
-        <div className="meta-compact" style={{ marginBottom: 8 }}>
-          <span>account_id: <span>{selectedAccountId}</span></span>
-          <span>PDA: <span className="mono">{pda ? truncateAddress(pda.toBase58()) : "-"}</span></span>
+        <div className="meta-compact" style={{ marginBottom: 8, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+          {t("viewingHint")}: <strong>{balance?.name ?? "—"}</strong>
         </div>
       )}
 
@@ -512,15 +601,15 @@ export default function App() {
         <div className="row">
           <button
             className="primary"
-            onClick={() => {
-              setCreateModalError("");
-              setShowCreateModal(true);
-            }}
+            onClick={() => setShowCreateModal(true)}
             disabled={!walletPublicKey || !program}
           >
             {t("createAccount")}
           </button>
-          <button onClick={refreshBalance} disabled={!walletPublicKey || !program || !pda || isRefreshing}>
+          <button
+            onClick={() => void refreshBalance()}
+            disabled={!walletPublicKey || !program || !pda || isRefreshing}
+          >
             {isRefreshing ? "..." : t("refreshBalance")}
           </button>
           <button onClick={refreshAccountsList} disabled={!walletPublicKey || !program}>
@@ -529,13 +618,17 @@ export default function App() {
         </div>
 
         <div className="balance">
-          <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>MiniAccount · {balance?.name ?? "-"}</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: "0.95rem" }}>
+            {t("selectedAccountLabel")} · <strong>{balance?.name ?? "—"}</strong>
+          </div>
           <div className="balanceLine" style={{ marginTop: 12 }}>
             <span className="balance-hero">{balance ? balanceSolStr : "0.0"}</span>
             <span className="muted">SOL</span>
           </div>
           <div className="balanceLine">
-            <span className="muted">{balance ? balance.balance.toString() : "0"} lamports</span>
+            <span className="muted">
+              {t("balanceLamports")}: {balance ? balance.balance.toString() : "0"}
+            </span>
           </div>
         </div>
       </div>
@@ -551,12 +644,11 @@ export default function App() {
                 key={acct.pubkey}
                 className={`accountItem ${acct.accountId === selectedAccountId ? "selected" : ""}`}
                 style={{ cursor: "pointer" }}
-                onClick={() => {
-                  setSelectedAccountId(acct.accountId);
-                  refreshBalance();
-                }}
+                onClick={() => setSelectedAccountId(acct.accountId)}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>{acct.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: "0.9rem" }}>
+                  <span className="muted">{t("onChainAddress")}</span>
                   <span className="mono">{truncateAddress(acct.pubkey)}</span>
                   <button
                     className="copy-btn"
@@ -564,14 +656,14 @@ export default function App() {
                       e.stopPropagation();
                       copyToClipboard(acct.pubkey);
                     }}
-                    title="复制 PDA"
+                    title={t("copyAddressTitle")}
                   >
                     <CopyIcon />
                   </button>
                 </div>
-                <div>account_id: {acct.accountId}</div>
-                <div>name: {acct.name}</div>
-                <div>balance: {acct.balance} lamports</div>
+                <div className="muted" style={{ marginBottom: 8 }}>
+                  {t("balanceLamports")}: {acct.balance}
+                </div>
                 <div className="field">
                   <label>{t("amountSol")}</label>
                   <input
@@ -616,22 +708,28 @@ export default function App() {
             ))}
           </div>
         )}
-        {deleteError ? <div className="error">{deleteError}</div> : null}
       </div>
 
-      <div className="status">
-        <div>
-          <b>{t("status")}:</b> {status}
+      <div className={`status ${statusLine.tone === "error" ? "status--error" : ""}`}>
+        <div className="status-line">
+          <b>{t("status")}:</b> {statusLine.text || "\u00a0"}
         </div>
-        {errorText ? (
-          <div className="error">
-            <b>{t("error")}:</b> {errorText}
-          </div>
-        ) : null}
       </div>
 
       {showCreateModal ? (
-        <div className="modalMask" onClick={() => setShowCreateModal(false)}>
+        <div
+          className="modalMask"
+          onMouseDown={(e) => {
+            createModalBackdropMouseDownRef.current = e.target === e.currentTarget;
+          }}
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (createModalBackdropMouseDownRef.current) {
+              setShowCreateModal(false);
+            }
+            createModalBackdropMouseDownRef.current = false;
+          }}
+        >
           <div className="modalCard" onClick={(e) => e.stopPropagation()}>
             <h3>{t("createModalTitle")}</h3>
             <div className="field">
@@ -642,20 +740,11 @@ export default function App() {
                 placeholder="alice-savings"
               />
             </div>
-            <div className="field">
-              <label>account_id (u64)</label>
-              <input
-                value={newAccountId}
-                onChange={(e) => setNewAccountId(e.target.value)}
-                placeholder="1"
-              />
-            </div>
             <div className="row">
               <button
-                onClick={() => handleCreateAccount(newAccountName.trim(), newAccountId.trim())}
+                onClick={() => handleCreateAccount(newAccountName.trim())}
                 disabled={
                   !newAccountName.trim() ||
-                  !newAccountId.trim() ||
                   !walletPublicKey ||
                   !program ||
                   isCreatingAccount
@@ -665,7 +754,6 @@ export default function App() {
               </button>
               <button onClick={() => setShowCreateModal(false)}>{t("cancel")}</button>
             </div>
-            {createModalError ? <div className="error">{createModalError}</div> : null}
           </div>
         </div>
       ) : null}

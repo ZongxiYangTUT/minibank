@@ -9,25 +9,37 @@ const MAX_NAME_LEN: usize = 32;
 pub mod minibank {
     use super::*;
 
-    pub fn create_account(
-        ctx: Context<CreateAccount>,
-        account_id: u64,
-        name: String,
-    ) -> Result<()> {
+    pub fn init_user_stats(ctx: Context<InitUserStats>) -> Result<()> {
+        ctx.accounts.user_stats.next_account_id = 0;
+        Ok(())
+    }
+
+    pub fn create_account(ctx: Context<CreateAccount>, name: String) -> Result<()> {
         require!(!name.is_empty(), ErrorCode::EmptyName);
         require!(name.len() <= MAX_NAME_LEN, ErrorCode::NameTooLong);
 
         msg!("Creating account for {}", name);
         ctx.accounts.mini_account.owner = ctx.accounts.payer.key();
-        ctx.accounts.mini_account.account_id = account_id;
+        ctx.accounts.mini_account.account_id = ctx.accounts.user_stats.next_account_id;
         ctx.accounts.mini_account.name = name;
         ctx.accounts.mini_account.balance = 0;
+        ctx.accounts.user_stats.next_account_id = ctx
+            .accounts
+            .mini_account
+            .account_id
+            .checked_add(1)
+            .ok_or(ErrorCode::MathOverflow)?;
         msg!("Account created successfully");
         Ok(())
     }
 
-    pub fn deposit(ctx: Context<Deposit>, _account_id: u64, amount: u64) -> Result<()> {
+    pub fn deposit(ctx: Context<Deposit>, account_id: u64, amount: u64) -> Result<()> {
         require!(amount > 0, ErrorCode::InvalidAmount);
+        // account_id 必须与指令数据一致（PDA 已校验，此处防调用方传错）
+        require!(
+            ctx.accounts.mini_account.account_id == account_id,
+            ErrorCode::InvalidAccountId
+        );
         msg!("Depositing {} lamports into account", amount);
 
         let from_pubkey = ctx.accounts.owner.to_account_info();
@@ -54,8 +66,12 @@ pub mod minibank {
         Ok(())
     }
 
-    pub fn withdraw(ctx: Context<Withdraw>, _account_id: u64, amount: u64) -> Result<()> {
+    pub fn withdraw(ctx: Context<Withdraw>, account_id: u64, amount: u64) -> Result<()> {
         require!(amount > 0, ErrorCode::InvalidAmount);
+        require!(
+            ctx.accounts.mini_account.account_id == account_id,
+            ErrorCode::InvalidAccountId
+        );
         msg!("Withdrawing {} lamports from account", amount);
 
         if ctx.accounts.mini_account.balance < amount {
@@ -65,7 +81,10 @@ pub mod minibank {
         let mini_info = ctx.accounts.mini_account.to_account_info();
         let recipient_info = ctx.accounts.recipient.to_account_info();
 
-        require!(mini_info.lamports() >= amount, ErrorCode::InsufficientVaultLamports);
+        require!(
+            mini_info.lamports() >= amount,
+            ErrorCode::InsufficientVaultLamports
+        );
 
         let recipient_new = recipient_info
             .lamports()
@@ -89,7 +108,11 @@ pub mod minibank {
         Ok(())
     }
 
-    pub fn delete_account(ctx: Context<DeleteAccount>, _account_id: u64) -> Result<()> {
+    pub fn delete_account(ctx: Context<DeleteAccount>, account_id: u64) -> Result<()> {
+        require!(
+            ctx.accounts.mini_account.account_id == account_id,
+            ErrorCode::InvalidAccountId
+        );
         msg!("Deleting account");
         require!(
             ctx.accounts.mini_account.balance == 0,
@@ -101,14 +124,28 @@ pub mod minibank {
 }
 
 #[derive(Accounts)]
-#[instruction(account_id: u64)]
+pub struct InitUserStats<'info> {
+    #[account(init,
+         seeds = [b"user_stats", owner.key().as_ref()], 
+         bump, 
+         payer = owner, 
+         space = 8 + UserStats::INIT_SPACE)]
+    user_stats: Account<'info, UserStats>,
+    #[account(mut)]
+    owner: Signer<'info>,
+    system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct CreateAccount<'info> {
+    #[account(mut, seeds = [b"user_stats", payer.key().as_ref()], bump)]
+    user_stats: Account<'info, UserStats>,
     #[account(
         init,
-        seeds = [b"mini_account", payer.key().as_ref(), &account_id.to_le_bytes()],
+        seeds = [b"mini_account", payer.key().as_ref(), &user_stats.next_account_id.to_le_bytes()],
         bump,
         payer = payer,
-        space = MiniAccount::SPACE
+        space = 8 + MiniAccount::INIT_SPACE
     )]
     mini_account: Account<'info, MiniAccount>,
     #[account(mut)]
@@ -163,15 +200,19 @@ pub struct DeleteAccount<'info> {
 }
 
 #[account]
+#[derive(InitSpace)]
 pub struct MiniAccount {
-    owner: Pubkey,
-    name: String,
-    balance: u64,
-    account_id: u64,
+    pub owner: Pubkey,
+    #[max_len(MAX_NAME_LEN)]
+    pub name: String,
+    pub balance: u64,
+    pub account_id: u64,
 }
 
-impl MiniAccount {
-    pub const SPACE: usize = 8 + 32 + 4 + MAX_NAME_LEN + 8 + 8;
+#[account]
+#[derive(InitSpace)]
+pub struct UserStats {
+    pub next_account_id: u64, // The next account ID to be used for a new account
 }
 
 #[error_code]
@@ -192,4 +233,6 @@ pub enum ErrorCode {
     InvalidRecipient,
     #[msg("Mini account does not have enough lamports")]
     InsufficientVaultLamports,
+    #[msg("Account id does not match instruction")]
+    InvalidAccountId,
 }

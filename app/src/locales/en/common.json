@@ -24,7 +24,11 @@
   "copyFailed": "Copy failed",
   "copied": "Copied to clipboard",
   "invalidAmount": "Amount must be greater than 0",
-  "invalidAccountId": "Invalid account_id",
+  "invalidAccountId": "Invalid account selection",
+  "viewingHint": "Viewing",
+  "onChainAddress": "On-chain address",
+  "copyAddressTitle": "Copy address",
+  "balanceLamports": "Balance (lamports)",
   "accountExists": "Account already exists for this wallet",
   "accountNotFound": "Account not found. Create one first",
   "walletDisconnected": "Wallet not configured. Set VITE_LOCAL_KEYPAIR_JSON first",
@@ -36,6 +40,13 @@
   "loadingDots": "...",
   "airdropConfirmed": "Airdrop confirmed",
   "airdropFailed": "Airdrop failed",
-  "balanceRefreshed": "Balance refreshed"
+  "balanceRefreshed": "Balance refreshed",
+  "deletingAccount": "Closing account…",
+  "selectedAccountLabel": "Savings account",
+  "statusIdle": "Ready",
+  "statusDepositing": "Depositing…",
+  "statusWithdrawing": "Withdrawing…",
+  "statusCreating": "Creating account…",
+  "accountClosed": "Account closed"
 }
 

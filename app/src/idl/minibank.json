@@ -21,6 +21,33 @@
       ],
       "accounts": [
         {
+          "name": "user_stats",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
           "name": "mini_account",
           "writable": true,
           "pda": {
@@ -47,11 +74,18 @@
                 "path": "payer"
               },
               {
-                "kind": "arg",
-                "path": "account_id"
+                "kind": "account",
+                "path": "user_stats.next_account_id",
+                "account": "UserStats"
               }
             ]
-          }
+          },
+          "init": true,
+          "payer": {
+            "kind": "account",
+            "path": "payer"
+          },
+          "space": 92
         },
         {
           "name": "payer",
@@ -64,10 +98,6 @@
         }
       ],
       "args": [
-        {
-          "name": "account_id",
-          "type": "u64"
-        },
         {
           "name": "name",
           "type": "string"
@@ -134,7 +164,7 @@
       ],
       "args": [
         {
-          "name": "_account_id",
+          "name": "account_id",
           "type": "u64"
         }
       ]
@@ -200,7 +230,7 @@
       ],
       "args": [
         {
-          "name": "_account_id",
+          "name": "account_id",
           "type": "u64"
         },
         {
@@ -208,6 +238,64 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "init_user_stats",
+      "discriminator": [
+        177,
+        113,
+        20,
+        232,
+        181,
+        87,
+        120,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "user_stats",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          },
+          "init": true,
+          "payer": {
+            "kind": "account",
+            "path": "owner"
+          },
+          "space": 16
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "withdraw",
@@ -269,7 +357,7 @@
       ],
       "args": [
         {
-          "name": "_account_id",
+          "name": "account_id",
           "type": "u64"
         },
         {
@@ -291,6 +379,19 @@
         41,
         159,
         33
+      ]
+    },
+    {
+      "name": "UserStats",
+      "discriminator": [
+        176,
+        223,
+        136,
+        27,
+        122,
+        79,
+        32,
+        227
       ]
     }
   ],
@@ -334,6 +435,11 @@
       "code": 6007,
       "name": "InsufficientVaultLamports",
       "msg": "Mini account does not have enough lamports"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidAccountId",
+      "msg": "Account id does not match instruction"
     }
   ],
   "types": [
@@ -356,6 +462,18 @@
           },
           {
             "name": "account_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserStats",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "next_account_id",
             "type": "u64"
           }
         ]

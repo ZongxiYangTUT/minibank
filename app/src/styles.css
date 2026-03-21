@@ -367,15 +367,31 @@ input::placeholder {
   color: var(--text-muted);
 }
 
-/* Status bar */
+/* Status bar — 单行固定高度，减少布局跳动与文字切换时的「闪」感 */
 .status {
   margin-top: 24px;
   padding: 14px 18px;
+  min-height: 3.25rem;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.1);
   border-radius: 12px;
   font-size: 0.9rem;
   color: var(--text-secondary);
+}
+
+.status.status--error {
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.2);
+  color: #fecaca;
+}
+
+.status-line {
+  width: 100%;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .error {

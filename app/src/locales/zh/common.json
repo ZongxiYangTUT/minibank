@@ -24,7 +24,11 @@
   "copyFailed": "复制失败",
   "copied": "已复制到剪贴板",
   "invalidAmount": "数量必须大于 0",
-  "invalidAccountId": "account_id 非法",
+  "invalidAccountId": "账户选择无效",
+  "viewingHint": "当前查看",
+  "onChainAddress": "链上地址",
+  "copyAddressTitle": "复制地址",
+  "balanceLamports": "余额（lamports）",
   "accountExists": "当前钱包的储蓄账户已存在",
   "accountNotFound": "未找到账户，请先创建",
   "walletDisconnected": "钱包未配置，请先设置 VITE_LOCAL_KEYPAIR_JSON",
@@ -36,6 +40,13 @@
   "loadingDots": "...",
   "airdropConfirmed": "空投已确认",
   "airdropFailed": "空投失败",
-  "balanceRefreshed": "余额已刷新"
+  "balanceRefreshed": "余额已刷新",
+  "deletingAccount": "正在关闭账户…",
+  "selectedAccountLabel": "储蓄账户",
+  "statusIdle": "就绪",
+  "statusDepositing": "正在存入…",
+  "statusWithdrawing": "正在取出…",
+  "statusCreating": "正在创建账户…",
+  "accountClosed": "账户已关闭"
 }
 
