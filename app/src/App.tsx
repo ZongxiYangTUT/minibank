@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Program, BN, AnchorProvider } from "@coral-xyz/anchor";
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useTranslation } from "react-i18next";
 
 import idl from "./idl/minibank.json";
+import { SOLANA_RPC_ENDPOINT } from "./SolanaWalletProvider";
 
 const programId = new PublicKey("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
 const accountSeed = "mini_account";
@@ -38,11 +41,28 @@ function lamportsToSolStr(lamports: bigint): string {
   return `${whole.toString()}.${fracStr}`;
 }
 
-export default function App() {
-  const endpoint = "http://127.0.0.1:8899";
-  const { t, i18n } = useTranslation();
+/** 与 Phantom 里「Devnet / Testnet」等选项对应；应用读余额只走 VITE_SOLANA_RPC 这一条 */
+function clusterNameFromRpc(endpoint: string): string {
+  const u = endpoint.toLowerCase();
+  if (u.includes("devnet")) return "Devnet";
+  if (u.includes("testnet")) return "Testnet";
+  if (u.includes("mainnet-beta")) return "Mainnet";
+  return "Custom";
+}
 
-  const connection = useMemo(() => new Connection(endpoint, "confirmed"), [endpoint]);
+function rpcHostDisplay(endpoint: string): string {
+  try {
+    return new URL(endpoint).hostname;
+  } catch {
+    return endpoint.slice(0, 48);
+  }
+}
+
+export default function App() {
+  const { t, i18n } = useTranslation();
+  const { connection } = useConnection();
+  const { publicKey, signTransaction, signAllTransactions, connected } = useWallet();
+
   const localKeypairRaw = (import.meta as any).env?.VITE_LOCAL_KEYPAIR_JSON as string | undefined;
   const localKeypair = useMemo(() => {
     if (!localKeypairRaw) return null;
@@ -54,8 +74,47 @@ export default function App() {
       return null;
     }
   }, [localKeypairRaw]);
-  const walletPublicKey = localKeypair?.publicKey ?? null;
+
+  const walletAdapterSigner = useMemo(() => {
+    if (!connected || !publicKey || !signTransaction || !signAllTransactions) return null;
+    return { publicKey, signTransaction, signAllTransactions };
+  }, [connected, publicKey, signTransaction, signAllTransactions]);
+
+  const localSigner = useMemo(() => {
+    if (!localKeypair) return null;
+    return {
+      publicKey: localKeypair.publicKey,
+      signTransaction: async (tx: Transaction) => {
+        tx.partialSign(localKeypair);
+        return tx;
+      },
+      signAllTransactions: async (txs: Transaction[]) => {
+        txs.forEach((tx) => tx.partialSign(localKeypair));
+        return txs;
+      }
+    };
+  }, [localKeypair]);
+
+  /** 浏览器钱包优先；未连接时使用 .env 本地密钥（仅开发） */
+  const activeSigner = useMemo(
+    () => walletAdapterSigner ?? localSigner,
+    [walletAdapterSigner, localSigner]
+  );
+  const walletPublicKey = activeSigner?.publicKey ?? null;
+  const usingLocalKeypairOnly = !walletAdapterSigner && !!localSigner;
+
+  /** 供 getBalance 使用，避免 useEffect 里调用 refreshWalletBalance 时闭包仍指向旧 publicKey */
+  const walletPublicKeyForBalanceRef = useRef<PublicKey | null>(null);
+  walletPublicKeyForBalanceRef.current = walletPublicKey;
+
+  const addressMismatch = useMemo(
+    () =>
+      !!(connected && publicKey && localKeypair && !publicKey.equals(localKeypair.publicKey)),
+    [connected, publicKey, localKeypair]
+  );
+
   const [walletSol, setWalletSol] = useState<string>("0.0");
+  const [walletSolFetchError, setWalletSolFetchError] = useState<string | null>(null);
 
   type StatusTone = "default" | "error";
   const [statusLine, setStatusLine] = useState<{ text: string; tone: StatusTone }>({ text: "", tone: "default" });
@@ -152,23 +211,10 @@ export default function App() {
   }, [walletPublicKey, selectedAccountIdBn]);
 
   const program = useMemo(() => {
-    if (!walletPublicKey || !localKeypair) return null;
-
-    const walletForAnchor: any = {
-      publicKey: walletPublicKey,
-      signTransaction: async (tx: Transaction) => {
-        tx.partialSign(localKeypair);
-        return tx;
-      },
-      signAllTransactions: async (txs: Transaction[]) => {
-        txs.forEach((tx) => tx.partialSign(localKeypair));
-        return txs;
-      }
-    };
-
-    const provider = new AnchorProvider(connection, walletForAnchor, {});
+    if (!walletPublicKey || !activeSigner) return null;
+    const provider = new AnchorProvider(connection, activeSigner as any, {});
     return new Program(idl as any, provider as any);
-  }, [connection, walletPublicKey, localKeypair]);
+  }, [connection, walletPublicKey, activeSigner]);
 
   /**
    * @param accountIdOverride 若传入，则按该 account_id 拉取余额（避免 setState 异步导致仍用旧的 selectedAccountId）
@@ -281,10 +327,27 @@ export default function App() {
   }, [walletPublicKey, program, pda]);
 
   async function refreshWalletBalance() {
-    if (!walletPublicKey) return;
-    const lamports = await connection.getBalance(walletPublicKey);
-    setWalletSol(lamportsToSolStr(BigInt(lamports)));
+    const pk = walletPublicKeyForBalanceRef.current;
+    if (!pk) return;
+    setWalletSolFetchError(null);
+    try {
+      const lamports = await connection.getBalance(pk, "confirmed");
+      setWalletSol(lamportsToSolStr(BigInt(lamports)));
+    } catch (e: unknown) {
+      console.error("refreshWalletBalance failed", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setWalletSolFetchError(msg.slice(0, 120));
+    }
   }
+
+  const walletOwnerBase58 = walletPublicKey?.toBase58() ?? "";
+
+  /** 同一地址在 local / Phantom 间切换时，依赖引用可能不触发主 effect；连接状态或地址变化时强制重拉 SOL */
+  useEffect(() => {
+    if (!walletOwnerBase58) return;
+    void refreshWalletBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, walletOwnerBase58, connection]);
 
   async function ensureUserStatsInitialized() {
     if (!program || !walletPublicKey || !localKeypair) return;
@@ -491,7 +554,12 @@ export default function App() {
     }
   }
 
-  const walletState = walletPublicKey ? "Connected" : "Disconnected";
+  /** 必须以 connected 为准显示「已连接」，不能仅凭 publicKey（断连瞬间可能不同步） */
+  const walletState = connected
+    ? t("connected")
+    : usingLocalKeypairOnly
+      ? t("walletLocalDev")
+      : "";
 
   const balanceLamports = balance ? BigInt(balance.balance.toString()) : 0n;
   const balanceSolStr = balance ? lamportsToSolStr(balanceLamports) : "0.0";
@@ -555,9 +623,18 @@ export default function App() {
         <h1 className="app-logo">{t("title")}</h1>
         <div className="header-actions">
           <div className="wallet-info">
+            <div className="wallet-toolbar">
+              <WalletMultiButton className="wallet-multi-btn" />
+            </div>
             {walletPublicKey ? (
               <>
-                <span className="wallet-badge">{walletState === "Connected" ? t("connected") : walletState}</span>
+                {walletState ? (
+                  <span
+                    className={`wallet-badge ${connected ? "" : "wallet-badge--local"}`}
+                  >
+                    {walletState}
+                  </span>
+                ) : null}
                 <div className="address-box">
                   <span className="mono">{truncateAddress(walletPublicKey.toBase58())}</span>
                   <button
@@ -572,6 +649,19 @@ export default function App() {
                   <SolIcon />
                   <span>{walletSol} SOL</span>
                 </div>
+                {walletSolFetchError ? (
+                  <p className="wallet-sol-fetch-error">{t("walletSolFetchError", { message: walletSolFetchError })}</p>
+                ) : null}
+                {addressMismatch ? (
+                  <p className="wallet-address-mismatch">
+                    {t("addressMismatchHint", {
+                      phantom: publicKey?.toBase58() ?? "",
+                      local: localKeypair?.publicKey.toBase58() ?? ""
+                    })}
+                  </p>
+                ) : !connected && localKeypair ? (
+                  <p className="wallet-balance-explain">{t("balanceTwoAddressesHint")}</p>
+                ) : null}
               </>
             ) : (
               <span style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
@@ -589,6 +679,15 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      <div className="rpc-network-hint" title={SOLANA_RPC_ENDPOINT}>
+        <span className="rpc-network-hint__line">
+          <strong>{t("rpcAppCluster")}</strong>: {clusterNameFromRpc(SOLANA_RPC_ENDPOINT)}
+          <span className="muted"> · </span>
+          <span className="mono rpc-network-hint__host">{rpcHostDisplay(SOLANA_RPC_ENDPOINT)}</span>
+        </span>
+        <p className="rpc-network-hint__tip">{t("rpcBalanceMismatchHint")}</p>
+      </div>
 
       {walletPublicKey && (
         <div className="meta-compact" style={{ marginBottom: 8, color: "var(--text-secondary)", fontSize: "0.9rem" }}>

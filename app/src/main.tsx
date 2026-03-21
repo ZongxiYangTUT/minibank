@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { Buffer } from "buffer/";
 
 import App from "./App";
+import { SolanaWalletProvider } from "./SolanaWalletProvider";
 import "./i18n";
 import "./styles.css";
 
@@ -11,7 +12,9 @@ import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <SolanaWalletProvider>
+      <App />
+    </SolanaWalletProvider>
   </React.StrictMode>
 );
 

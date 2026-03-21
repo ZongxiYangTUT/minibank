@@ -1,7 +1,8 @@
 {
   "title": "Minibank",
   "connected": "已连接",
-  "notConfigured": "未配置钱包 (VITE_LOCAL_KEYPAIR_JSON)",
+  "notConfigured": "请连接 Phantom / Solflare，钱包网络选 Devnet（或与 VITE_SOLANA_RPC 一致）",
+  "walletLocalDev": "本地密钥",
   "airdrop": "空投 1 SOL",
   "refresh": "刷新",
   "accountAndBalance": "账户与余额",
@@ -31,7 +32,7 @@
   "balanceLamports": "余额（lamports）",
   "accountExists": "当前钱包的储蓄账户已存在",
   "accountNotFound": "未找到账户，请先创建",
-  "walletDisconnected": "钱包未配置，请先设置 VITE_LOCAL_KEYPAIR_JSON",
+  "walletDisconnected": "未连接钱包；可连接浏览器钱包或使用本地密钥",
   "deleteNonZero": "关闭失败：账户余额不为 0，请先提到 0 再关闭",
   "txFailed": "交易失败，请检查参数后重试",
   "langLabel": "语言",
@@ -47,6 +48,11 @@
   "statusDepositing": "正在存入…",
   "statusWithdrawing": "正在取出…",
   "statusCreating": "正在创建账户…",
-  "accountClosed": "账户已关闭"
+  "accountClosed": "账户已关闭",
+  "rpcAppCluster": "应用 RPC 集群",
+  "rpcBalanceMismatchHint": "头部 SOL 由当前 RPC 查链上余额。容易出问题的是「集群」不一致：Phantom 选 Testnet、应用连 Devnet（或相反）时不是同一条链，余额常会像 0。同一 Devnet 下换不同 RPC（官方、Alchemy、Helius 等）只是不同节点，连的都是同一套 Devnet 数据，一般不会因为换了 Alchemy 就变 0。",
+  "balanceTwoAddressesHint": "未连接时若使用 .env 本地密钥，查的是「本地地址」的余额；连接 Phantom 后改为查「钱包地址」，两个地址不同，余额也会不同（Phantom 在 Devnet 未领水时常为 0）。断开钱包可再回到本地地址。",
+  "addressMismatchHint": "Phantom 当前地址（{{phantom}}）与 .env 私钥对应地址（{{local}}）不一致，头部 SOL 按 Phantom 地址查询。若与未连接时看到的余额不同，请在 Phantom 中切换到该私钥对应的账户，或核对 VITE_LOCAL_KEYPAIR_JSON 是否与 id.json 一致。",
+  "walletSolFetchError": "读取 SOL 失败：{{message}}"
 }
 
