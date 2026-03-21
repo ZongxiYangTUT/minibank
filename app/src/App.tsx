@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Program, BN, AnchorProvider } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useTranslation } from "react-i18next";
 
 import idl from "./idl/minibank.json";
-import { SOLANA_RPC_ENDPOINT } from "./SolanaWalletProvider";
+import { SolanaNetwork, useSolanaNetwork } from "./SolanaWalletProvider";
 
 const programId = new PublicKey("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
 const accountSeed = "mini_account";
@@ -41,27 +41,14 @@ function lamportsToSolStr(lamports: bigint): string {
   return `${whole.toString()}.${fracStr}`;
 }
 
-/** 与 Phantom 里「Devnet / Testnet」等选项对应；应用读余额只走 VITE_SOLANA_RPC 这一条 */
-function clusterNameFromRpc(endpoint: string): string {
-  const u = endpoint.toLowerCase();
-  if (u.includes("devnet")) return "Devnet";
-  if (u.includes("testnet")) return "Testnet";
-  if (u.includes("mainnet-beta")) return "Mainnet";
-  return "Custom";
-}
-
-function rpcHostDisplay(endpoint: string): string {
-  try {
-    return new URL(endpoint).hostname;
-  } catch {
-    return endpoint.slice(0, 48);
-  }
-}
+type SignerMode = "none" | "browser" | "local";
 
 export default function App() {
   const { t, i18n } = useTranslation();
+  const { selectedNetwork, setSelectedNetwork } = useSolanaNetwork();
   const { connection } = useConnection();
-  const { publicKey, signTransaction, signAllTransactions, connected } = useWallet();
+  const { publicKey, signTransaction, signAllTransactions, connected, disconnect } = useWallet();
+  const { setVisible: setWalletModalVisible } = useWalletModal();
 
   const localKeypairRaw = (import.meta as any).env?.VITE_LOCAL_KEYPAIR_JSON as string | undefined;
   const localKeypair = useMemo(() => {
@@ -95,13 +82,19 @@ export default function App() {
     };
   }, [localKeypair]);
 
-  /** 浏览器钱包优先；未连接时使用 .env 本地密钥（仅开发） */
-  const activeSigner = useMemo(
-    () => walletAdapterSigner ?? localSigner,
-    [walletAdapterSigner, localSigner]
-  );
+  const [signerMode, setSignerMode] = useState<SignerMode>("none");
+
+  const browserReady = !!walletAdapterSigner;
+  const localReady = !!localSigner;
+
+  /** 连接方式二选一：浏览器钱包或本地密钥 */
+  const activeSigner = useMemo(() => {
+    if (signerMode === "none") return null;
+    if (signerMode === "local") return localSigner;
+    return walletAdapterSigner;
+  }, [signerMode, localSigner, walletAdapterSigner]);
   const walletPublicKey = activeSigner?.publicKey ?? null;
-  const usingLocalKeypairOnly = !walletAdapterSigner && !!localSigner;
+  const usingLocalSigner = signerMode === "local";
 
   /** 供 getBalance 使用，避免 useEffect 里调用 refreshWalletBalance 时闭包仍指向旧 publicKey */
   const walletPublicKeyForBalanceRef = useRef<PublicKey | null>(null);
@@ -115,6 +108,7 @@ export default function App() {
 
   const [walletSol, setWalletSol] = useState<string>("0.0");
   const [walletSolFetchError, setWalletSolFetchError] = useState<string | null>(null);
+  const [showConnectMenu, setShowConnectMenu] = useState(false);
 
   type StatusTone = "default" | "error";
   const [statusLine, setStatusLine] = useState<{ text: string; tone: StatusTone }>({ text: "", tone: "default" });
@@ -554,11 +548,13 @@ export default function App() {
     }
   }
 
-  /** 必须以 connected 为准显示「已连接」，不能仅凭 publicKey（断连瞬间可能不同步） */
-  const walletState = connected
-    ? t("connected")
-    : usingLocalKeypairOnly
+  /** 状态徽标按当前连接方式显示：浏览器钱包或本地密钥 */
+  const walletState = usingLocalSigner
+    ? localReady
       ? t("walletLocalDev")
+      : ""
+    : browserReady
+      ? t("connected")
       : "";
 
   const balanceLamports = balance ? BigInt(balance.balance.toString()) : 0n;
@@ -603,6 +599,23 @@ export default function App() {
     </svg>
   );
 
+  async function handleDisconnectCurrentMode() {
+    if (signerMode === "none") return;
+    if (signerMode === "browser" && connected) {
+      await disconnect();
+    }
+    setSignerMode("none");
+    setAppStatus(t("walletDisconnected"), "error");
+  }
+
+  function handleConnectWithMode(mode: Exclude<SignerMode, "none">) {
+    setSignerMode(mode);
+    setShowConnectMenu(false);
+    if (mode === "browser") setWalletModalVisible(true);
+  }
+
+  const canUseApp = signerMode !== "none" && !!activeSigner && !!walletPublicKey && !!program;
+
   return (
     <div className="container">
       <div className="lang-corner">
@@ -624,13 +637,42 @@ export default function App() {
         <div className="header-actions">
           <div className="wallet-info">
             <div className="wallet-toolbar">
-              <WalletMultiButton className="wallet-multi-btn" />
+              <div className="connect-entry">
+                <button
+                  className="connect-btn"
+                  onClick={() => setShowConnectMenu((v) => !v)}
+                  type="button"
+                >
+                  {t("connect")}
+                </button>
+                {showConnectMenu ? (
+                  <div className="connect-menu">
+                    <button type="button" onClick={() => handleConnectWithMode("browser")}>
+                      {t("signerBrowserWallet")}
+                    </button>
+                    <button type="button" onClick={() => handleConnectWithMode("local")}>
+                      {t("walletLocalDev")}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <label className="toolbar-select-wrap">
+                <span>{t("network")}</span>
+                <select
+                  className="toolbar-select"
+                  value={selectedNetwork}
+                  onChange={(e) => setSelectedNetwork(e.target.value as SolanaNetwork)}
+                >
+                  <option value="devnet">Devnet</option>
+                  <option value="localhost">Localhost</option>
+                </select>
+              </label>
             </div>
             {walletPublicKey ? (
               <>
                 {walletState ? (
                   <span
-                    className={`wallet-badge ${connected ? "" : "wallet-badge--local"}`}
+                    className={`wallet-badge ${usingLocalSigner ? "wallet-badge--local" : ""}`}
                   >
                     {walletState}
                   </span>
@@ -652,42 +694,38 @@ export default function App() {
                 {walletSolFetchError ? (
                   <p className="wallet-sol-fetch-error">{t("walletSolFetchError", { message: walletSolFetchError })}</p>
                 ) : null}
-                {addressMismatch ? (
+                {addressMismatch && usingLocalSigner ? (
                   <p className="wallet-address-mismatch">
                     {t("addressMismatchHint", {
                       phantom: publicKey?.toBase58() ?? "",
                       local: localKeypair?.publicKey.toBase58() ?? ""
                     })}
                   </p>
-                ) : !connected && localKeypair ? (
-                  <p className="wallet-balance-explain">{t("balanceTwoAddressesHint")}</p>
                 ) : null}
               </>
             ) : (
               <span style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                {t("notConfigured")}
+                {signerMode === "local" && !localKeypair
+                  ? t("localKeypairMissing")
+                  : signerMode === "browser"
+                    ? t("walletDisconnected")
+                    : t("notConfigured")}
               </span>
             )}
           </div>
           <div className="row">
-            <button className="primary" onClick={handleAirdrop} disabled={!walletPublicKey}>
+            <button className="primary" onClick={handleAirdrop} disabled={!canUseApp}>
               {t("airdrop")}
             </button>
-            <button onClick={refreshWalletBalance} disabled={!walletPublicKey}>
+            <button onClick={refreshWalletBalance} disabled={!canUseApp}>
               {t("refresh")}
+            </button>
+            <button onClick={() => void handleDisconnectCurrentMode()} disabled={signerMode === "none"}>
+              {t("disconnectWallet")}
             </button>
           </div>
         </div>
       </header>
-
-      <div className="rpc-network-hint" title={SOLANA_RPC_ENDPOINT}>
-        <span className="rpc-network-hint__line">
-          <strong>{t("rpcAppCluster")}</strong>: {clusterNameFromRpc(SOLANA_RPC_ENDPOINT)}
-          <span className="muted"> · </span>
-          <span className="mono rpc-network-hint__host">{rpcHostDisplay(SOLANA_RPC_ENDPOINT)}</span>
-        </span>
-        <p className="rpc-network-hint__tip">{t("rpcBalanceMismatchHint")}</p>
-      </div>
 
       {walletPublicKey && (
         <div className="meta-compact" style={{ marginBottom: 8, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
@@ -701,17 +739,17 @@ export default function App() {
           <button
             className="primary"
             onClick={() => setShowCreateModal(true)}
-            disabled={!walletPublicKey || !program}
+            disabled={!canUseApp}
           >
             {t("createAccount")}
           </button>
           <button
             onClick={() => void refreshBalance()}
-            disabled={!walletPublicKey || !program || !pda || isRefreshing}
+            disabled={!canUseApp || !pda || isRefreshing}
           >
             {isRefreshing ? "..." : t("refreshBalance")}
           </button>
-          <button onClick={refreshAccountsList} disabled={!walletPublicKey || !program}>
+          <button onClick={refreshAccountsList} disabled={!canUseApp}>
             {t("refreshList")}
           </button>
         </div>
@@ -782,6 +820,7 @@ export default function App() {
                       e.stopPropagation();
                       handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
                     }}
+                    disabled={!canUseApp}
                   >
                     {t("deposit")}
                   </button>
@@ -790,6 +829,7 @@ export default function App() {
                       e.stopPropagation();
                       handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
                     }}
+                    disabled={!canUseApp}
                   >
                     {t("withdraw")}
                   </button>
@@ -798,7 +838,7 @@ export default function App() {
                       e.stopPropagation();
                       handleDeleteAccount(acct.accountId);
                     }}
-                    disabled={isDeletingAccount}
+                    disabled={!canUseApp || isDeletingAccount}
                   >
                     {t("closeAccount")}
                   </button>
@@ -844,8 +884,7 @@ export default function App() {
                 onClick={() => handleCreateAccount(newAccountName.trim())}
                 disabled={
                   !newAccountName.trim() ||
-                  !walletPublicKey ||
-                  !program ||
+                  !canUseApp ||
                   isCreatingAccount
                 }
               >

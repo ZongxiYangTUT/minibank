@@ -1,8 +1,13 @@
 {
   "title": "Minibank",
   "connected": "Connected",
-  "notConfigured": "Connect Phantom / Solflare; use Devnet in wallet (or match VITE_SOLANA_RPC)",
+  "notConfigured": "Choose connection mode: browser wallet or local keypair",
   "walletLocalDev": "Local keypair",
+  "localKeypairMissing": "Local keypair missing (auto-loading ~/.config/solana/id.json was attempted)",
+  "network": "Network",
+  "signerMode": "Signer",
+  "signerBrowserWallet": "Browser wallet (Phantom/Solflare)",
+  "disconnectWallet": "Disconnect",
   "airdrop": "Airdrop 1 SOL",
   "refresh": "Refresh",
   "accountAndBalance": "Account & Balance",
@@ -32,7 +37,7 @@
   "balanceLamports": "Balance (lamports)",
   "accountExists": "Account already exists for this wallet",
   "accountNotFound": "Account not found. Create one first",
-  "walletDisconnected": "No wallet: connect a browser wallet or use local keypair in .env",
+  "walletDisconnected": "Disconnected. Choose browser wallet or local keypair to continue",
   "deleteNonZero": "Close failed: account balance is not zero. Withdraw to zero first",
   "txFailed": "Transaction failed. Check params and try again",
   "langLabel": "Language",
@@ -49,10 +54,7 @@
   "statusWithdrawing": "Withdrawing…",
   "statusCreating": "Creating account…",
   "accountClosed": "Account closed",
-  "rpcAppCluster": "App RPC cluster",
-  "rpcBalanceMismatchHint": "SOL is read via the RPC URL above. Wrong cluster is the usual issue: Phantom on Testnet while the app uses Devnet (or the reverse)—not the same chain, balance often looks like 0. Any Devnet RPC (public, Alchemy, Helius, etc.) points at the same Devnet ledger; switching providers alone should not zero out a balance.",
-  "balanceTwoAddressesHint": "Without Phantom, a funded VITE_LOCAL_KEYPAIR_JSON address may show a balance; after connecting, the app uses your Phantom address—different pubkey, different balance (often 0 if you never airdropped that wallet on Devnet). Disconnect to use the local key again.",
   "addressMismatchHint": "Phantom address ({{phantom}}) does not match your .env keypair address ({{local}}); SOL shown is for Phantom. If it differs from what you saw while disconnected, switch to the matching account in Phantom or verify VITE_LOCAL_KEYPAIR_JSON matches id.json.",
-  "walletSolFetchError": "Could not read SOL: {{message}}"
+  "walletSolFetchError": "Could not read SOL: {{message}}",
+  "connect": "Connect"
 }
-
