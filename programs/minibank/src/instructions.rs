@@ -1,4 +1,4 @@
-//! 各指令的业务逻辑，与 `#[program]` 中的入口一一对应。
+//! Instruction handlers; each entry point in `#[program]` delegates here.
 
 pub mod create_account;
 pub mod delete_account;

@@ -1,4 +1,4 @@
-//! 程序级常量（种子、长度上限等）。
+//! Program-wide constants (PDA seeds, string length limits).
 
 pub const MAX_NAME_LEN: usize = 32;
 

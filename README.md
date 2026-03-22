@@ -1,14 +1,76 @@
-# minibank
+# Minibank
 
-Solana / Anchor 学习项目。
+A minimal **Solana + Anchor** demo: per-user savings accounts (`MiniAccount` PDAs), deposits, withdrawals, and account close. Includes a **React + Vite** UI with wallet or local keypair signing.
 
-## 前端 RPC（浏览器）
+## Repository layout
 
-- 默认使用 **Devnet**：`https://api.devnet.solana.com`（**不使用 localhost**）。
-- **Phantom 选 Testnet、页面仍用 Devnet 时，头部 SOL 余额会显示 0**（两条链上同一地址余额无关）。在 `app/.env` 设 `VITE_SOLANA_RPC=https://api.testnet.solana.com` 并重启，与钱包一致即可。
-- 同一 **Devnet** 下，用 Alchemy / Helius / `api.devnet.solana.com` 等**任意 Devnet RPC** 都是同一套链上状态，只是接入点不同；与「Devnet vs Testnet 混用」不是一回事。
-- 若要用官方 **Testnet** 集群：在 `app/.env` 里设置  
-  `VITE_SOLANA_RPC=https://api.testnet.solana.com`，并在 Phantom 里切到同一网络。
-- 本地 `solana-test-validator` 仅在你显式把 `VITE_SOLANA_RPC` 指到 `http://127.0.0.1:8899` 时使用。
+| Path | Description |
+|------|-------------|
+| `programs/minibank/` | Anchor program (`lib.rs`, `instructions/`, `state/`, `contexts.rs`, `error.rs`, `constants.rs`) |
+| `app/` | Frontend (`npm run dev` / `npm run build`) |
+| `tests/` | TypeScript integration tests (`anchor test`) |
+| `target/idl/` | Generated IDL after `anchor build` (copy into `app/src/idl/` when the program changes) |
 
-链上程序需部署在与 RPC 相同的集群；`app/src/idl/minibank.json` 里的 program id 需与该集群上一致。
+## Prerequisites
+
+- Rust, Solana CLI, Anchor CLI
+- Node.js (for frontend and tests)
+
+## On-chain program
+
+```bash
+anchor build
+anchor test
+```
+
+Deploy to the cluster configured in `Anchor.toml` (`[provider]`):
+
+```bash
+anchor deploy
+```
+
+The deployed program id must match `declare_id!` in `programs/minibank/src/lib.rs` and the IDL consumed by the app.
+
+### Module layout (Rust)
+
+- `programs/minibank/src/lib.rs` — program entry and `#[program]` dispatch
+- `instructions/` — per-instruction handlers
+- `state/` — `#[account]` structs (`MiniAccount`, `UserStats`)
+- `contexts.rs` — `#[derive(Accounts)]` validation contexts (named `contexts` because `#[program]` macro reserves a `accounts` module name at the crate root)
+- `error.rs` — `#[error_code]`
+- `constants.rs` — seeds and limits
+
+## Frontend (`app/`)
+
+```bash
+cd app
+npm install
+npm run dev
+```
+
+### Environment
+
+| Variable | Purpose |
+|----------|---------|
+| `VITE_SOLANA_RPC` | Optional. If set, used to choose initial RPC cluster (devnet vs localhost). The UI can still switch network in the header. |
+| `VITE_LOCAL_KEYPAIR_JSON` | Optional. JSON array of byte values for a local dev keypair. If omitted, `vite.config.ts` can inject `~/.config/solana/id.json` at build time for convenience. |
+
+Copy `app/.env.example` to `app/.env.local` and adjust.
+
+### Connection & signing
+
+- **Connect** opens a menu: browser wallet (Phantom / Solflare) or **local keypair** (same bytes as `id.json` / env).
+- **Network** selector: **Devnet** (`https://api.devnet.solana.com`) or **Localhost** (`http://127.0.0.1:8899`). All reads and transactions use the selected RPC; local keypair only affects **who signs**, not which cluster unless you pick Localhost.
+
+### Balance & cluster
+
+- Native SOL balance comes from `connection.getBalance` against the **RPC endpoint** you selected. If you choose **Localhost** but no `solana-test-validator` is listening on `8899`, RPC calls will fail until you start a validator or switch back to Devnet.
+- Keep the **program deployed** on the same cluster as the RPC URL; otherwise instructions will fail or point at the wrong program.
+
+### IDL sync
+
+After changing the program, run `anchor build` and copy the generated `target/idl/minibank.json` to `app/src/idl/minibank.json` (or your bundler path) so the client matches the on-chain IDL.
+
+## License
+
+ISC (see root `package.json`).

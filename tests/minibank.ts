@@ -48,7 +48,7 @@ describe("minibank", () => {
     const accountId = stats.nextAccountId.toNumber();
     const [miniAccountPda] = getMiniAccountPda(owner, accountId);
 
-    // 让 Anchor 根据 IDL 解析 PDA（与手动传入的 PDA 等价，避免账户顺序/编码问题）
+    // Let Anchor resolve accounts from the IDL (same PDAs as manual passes; avoids ordering/encoding issues).
     await program.methods
       .createAccount(name)
       .accounts({

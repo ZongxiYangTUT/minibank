@@ -101,7 +101,7 @@ body {
   min-width: 280px;
 }
 
-/* 徽标 + 地址 + SOL：单行对齐，避免换行后 SOL 掉到下一行呈「台阶」 */
+/* Badge + address + SOL: single row; avoids SOL wrapping alone (“staircase” layout). */
 .wallet-summary-strip {
   display: flex;
   flex-wrap: nowrap;
@@ -146,7 +146,7 @@ body {
   flex-wrap: wrap;
 }
 
-/* 与页面主按钮风格对齐；wallet-adapter 默认样式较亮 */
+/* Match primary buttons; wallet-adapter default chrome is very bright. */
 .wallet-multi-btn {
   background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%) !important;
   color: #fff !important;
@@ -242,7 +242,7 @@ body {
   animation: pulse 2s infinite;
 }
 
-/* 未连浏览器钱包、仅用 .env 本地密钥时，不用「已连接」绿色样式 */
+/* Local keypair mode: amber badge instead of green “connected”. */
 .wallet-badge--local {
   background: rgba(245, 158, 11, 0.12);
   border-color: rgba(245, 158, 11, 0.45);
@@ -525,7 +525,7 @@ input::placeholder {
   color: var(--text-muted);
 }
 
-/* Status bar — 单行固定高度，减少布局跳动与文字切换时的「闪」感 */
+/* Status bar: fixed single-line height to reduce layout jump / flicker on text changes. */
 .status {
   margin-top: 24px;
   padding: 14px 18px;

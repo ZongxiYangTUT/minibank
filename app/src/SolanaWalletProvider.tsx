@@ -46,7 +46,7 @@ export function SolanaWalletProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  /* wallet-adapter 与 React 18 类型在部分版本下 FC 签名不兼容 */
+  /* wallet-adapter vs React 18: FC typings sometimes disagree; cast below. */
   const Conn = ConnectionProvider as React.ComponentType<{
     endpoint: string;
     children?: React.ReactNode;

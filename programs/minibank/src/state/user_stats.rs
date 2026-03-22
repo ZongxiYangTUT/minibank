@@ -3,6 +3,6 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(InitSpace)]
 pub struct UserStats {
-    /// 下一个创建账户时使用的 account_id
+    /// Next `account_id` to allocate when creating a new savings account.
     pub next_account_id: u64,
 }

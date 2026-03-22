@@ -87,7 +87,7 @@ export default function App() {
   const browserReady = !!walletAdapterSigner;
   const localReady = !!localSigner;
 
-  /** 连接方式二选一：浏览器钱包或本地密钥 */
+  /** Signer source: browser wallet or local keypair (mutually exclusive by mode). */
   const activeSigner = useMemo(() => {
     if (signerMode === "none") return null;
     if (signerMode === "local") return localSigner;
@@ -96,7 +96,7 @@ export default function App() {
   const walletPublicKey = activeSigner?.publicKey ?? null;
   const usingLocalSigner = signerMode === "local";
 
-  /** 供 getBalance 使用，避免 useEffect 里调用 refreshWalletBalance 时闭包仍指向旧 publicKey */
+  /** Latest pubkey for getBalance; avoids stale closure when effects call refreshWalletBalance. */
   const walletPublicKeyForBalanceRef = useRef<PublicKey | null>(null);
   walletPublicKeyForBalanceRef.current = walletPublicKey;
 
@@ -113,11 +113,11 @@ export default function App() {
   type StatusTone = "default" | "error";
   const [statusLine, setStatusLine] = useState<{ text: string; tone: StatusTone }>({ text: "", tone: "default" });
 
-  /** 复制地址后延迟恢复状态的定时器，需在其它提示前清掉，否则会盖住错误信息 */
+  /** Timer to restore status after copy; cleared before other toasts so errors stay visible. */
   const copyRestoreTimerRef = useRef<number | null>(null);
-  /** 用户操作触发的拉取（会改状态栏/刷新按钮）：与 invalidate 共用，用于丢弃过期请求 */
+  /** Epoch for user-driven balance fetches; paired with invalidatePendingBalanceFetch to drop stale responses. */
   const balanceFetchEpochRef = useRef(0);
-  /** 仅 useEffect 静默拉取：单独计数，避免与上一条并存时把 interaction 的 epoch 顶掉，导致存/取成功后永远不执行 setAppStatus */
+  /** Epoch for silent effect-only fetches so they do not clobber interaction epoch after deposit/withdraw. */
   const silentFetchGenRef = useRef(0);
 
   function invalidatePendingBalanceFetch() {
@@ -126,7 +126,7 @@ export default function App() {
     setIsRefreshing(false);
   }
 
-  /** 文案与色调均未变时不 setState，避免「同一条提示」因连续两次 setState 仍触发重渲染而闪烁 */
+  /** Skip setState when text and tone unchanged to avoid flicker from identical consecutive updates. */
   function setAppStatus(text: string, tone: StatusTone = "default") {
     if (copyRestoreTimerRef.current) {
       clearTimeout(copyRestoreTimerRef.current);
@@ -149,7 +149,7 @@ export default function App() {
 
   const [selectedAccountId, setSelectedAccountId] = useState<string>("0");
 
-  /** 仅当按下与点击都发生在遮罩本身时才关闭，避免从输入框拖选文字到遮罩外松开时误关弹窗 */
+  /** Close create modal only when mousedown and mouseup both target the backdrop (not drag-select from inputs). */
   const createModalBackdropMouseDownRef = useRef(false);
 
   function friendlyError(e: any): string {
@@ -211,9 +211,9 @@ export default function App() {
   }, [connection, walletPublicKey, activeSigner]);
 
   /**
-   * @param accountIdOverride 若传入，则按该 account_id 拉取余额（避免 setState 异步导致仍用旧的 selectedAccountId）
-   * @param opts.updateStatus 为 false 时不改写底部状态文案（用于紧跟在存/取后的 pda effect，避免重复「余额已刷新」）
-   * @param opts.showRefreshing 为 false 时不切换「刷新中」按钮状态（避免与主流程重复闪烁）
+   * @param accountIdOverride When set, fetch balance for this account id (avoids stale selectedAccountId after setState).
+   * @param opts.updateStatus If false, do not write the bottom status line (e.g. after deposit/withdraw + PDA effect).
+   * @param opts.showRefreshing If false, do not toggle the refreshing button state.
    */
   async function refreshBalance(
     accountIdOverride?: string,
@@ -261,7 +261,7 @@ export default function App() {
     }
   }
 
-  /** 链上 `miniAccount.all()` + 按当前钱包过滤，等价于「该钱包下全部储蓄账户」的 getAll */
+  /** On-chain `miniAccount.all()` filtered by current wallet PDAs — getAll savings accounts for this owner. */
   async function fetchAllSavingsAccounts(): Promise<ListedAccount[]> {
     try {
       if (!program || !walletPublicKey) {
@@ -309,11 +309,11 @@ export default function App() {
 
   useEffect(() => {
     if (walletPublicKey && program) {
-      /* 列表只依赖钱包 + Program，不必等当前选中账户的 PDA；一连上即可 getAll 储蓄账户 */
+      /* List needs wallet + program only; no need to wait for selected-account PDA. */
       void fetchAllSavingsAccounts();
       refreshWalletBalance();
       if (pda) {
-        /* 仅同步当前选中账户的链上余额，不写底部状态栏 */
+        /* Sync selected account balance from chain; do not touch bottom status line. */
         void refreshBalance(undefined, { updateStatus: false, showRefreshing: false });
       }
     }
@@ -340,7 +340,7 @@ export default function App() {
 
   const walletOwnerBase58 = walletPublicKey?.toBase58() ?? "";
 
-  /** 同一地址在 local / Phantom 间切换时，依赖引用可能不触发主 effect；连接状态或地址变化时强制重拉 SOL */
+  /** When wallet address or connection changes, refetch native SOL (main effect deps may not fire in all cases). */
   useEffect(() => {
     if (!walletOwnerBase58) return;
     void refreshWalletBalance();
@@ -552,7 +552,7 @@ export default function App() {
     }
   }
 
-  /** 状态徽标按当前连接方式显示：浏览器钱包或本地密钥 */
+  /** Badge label: browser wallet vs local keypair mode. */
   const walletState = usingLocalSigner
     ? localReady
       ? t("walletLocalDev")

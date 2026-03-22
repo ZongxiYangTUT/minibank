@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+/** Read ~/.config/solana/id.json so VITE_LOCAL_KEYPAIR_JSON can default at build time (dev only). */
 function readDefaultLocalKeypair(): string {
   try {
     const p = path.join(os.homedir(), ".config", "solana", "id.json");
@@ -22,6 +23,7 @@ export default defineConfig(() => {
   return {
     plugins: [react()],
     define: {
+      // Compile-time inject; process.env wins over id.json fallback.
       "import.meta.env.VITE_LOCAL_KEYPAIR_JSON": JSON.stringify(
         process.env.VITE_LOCAL_KEYPAIR_JSON || fallbackLocalKeypair
       )

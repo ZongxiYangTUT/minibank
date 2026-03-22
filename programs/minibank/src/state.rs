@@ -1,4 +1,4 @@
-//! 链上账户数据布局（`#[account]`）。
+//! On-chain account data layouts (`#[account]`).
 
 pub mod mini_account;
 pub mod user_stats;

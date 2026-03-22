@@ -1,7 +1,4 @@
-//! 与 [Anchor Quickstart 目录约定](https://www.anchor-lang.com/docs/quickstart/local) 对齐：
-//! `lib.rs`、`constants.rs`、`error.rs`、`state/`、`instructions/`。
-//!
-//! `#[derive(Accounts)]` 的上下文放在 `contexts.rs`：crate 根不能命名为 `accounts`，会与 `#[program]` 宏生成的模块冲突。
+//! Minibank program entry: declares modules and dispatches `#[program]` instructions to `instructions::*`.
 
 use anchor_lang::prelude::*;
 

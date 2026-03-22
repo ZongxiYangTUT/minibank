@@ -15,7 +15,7 @@ minibank = "qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "https://solana-devnet.g.alchemy.com/v2/XpSz4kWN81Y1BX8pTUEP_"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
