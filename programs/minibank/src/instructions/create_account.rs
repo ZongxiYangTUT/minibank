@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::contexts::CreateAccount;
 use crate::constants::MAX_NAME_LEN;
-use crate::errors::ErrorCode;
+use crate::error::ErrorCode;
 
 pub fn process(ctx: Context<CreateAccount>, name: String) -> Result<()> {
     require!(!name.is_empty(), ErrorCode::EmptyName);

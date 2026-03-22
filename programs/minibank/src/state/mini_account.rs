@@ -11,10 +11,3 @@ pub struct MiniAccount {
     pub balance: u64,
     pub account_id: u64,
 }
-
-#[account]
-#[derive(InitSpace)]
-pub struct UserStats {
-    /// 下一个创建账户时使用的 account_id
-    pub next_account_id: u64,
-}

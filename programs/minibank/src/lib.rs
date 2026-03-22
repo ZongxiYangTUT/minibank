@@ -1,15 +1,18 @@
-//! Minibank：按 Anchor 常见结构拆分为 `constants` / `state` / `errors` / `accounts` / `instructions`。
+//! 与 [Anchor Quickstart 目录约定](https://www.anchor-lang.com/docs/quickstart/local) 对齐：
+//! `lib.rs`、`constants.rs`、`error.rs`、`state/`、`instructions/`。
+//!
+//! `#[derive(Accounts)]` 的上下文放在 `contexts.rs`：crate 根不能命名为 `accounts`，会与 `#[program]` 宏生成的模块冲突。
 
 use anchor_lang::prelude::*;
 
 pub mod constants;
 pub mod contexts;
-pub mod errors;
+pub mod error;
 pub mod instructions;
 pub mod state;
 
 pub use contexts::*;
-pub use errors::ErrorCode;
+pub use error::ErrorCode;
 pub use state::{MiniAccount, UserStats};
 
 declare_id!("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");

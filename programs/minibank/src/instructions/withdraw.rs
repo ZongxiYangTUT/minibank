@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::contexts::Withdraw;
-use crate::errors::ErrorCode;
+use crate::error::ErrorCode;
 
 pub fn process(ctx: Context<Withdraw>, account_id: u64, amount: u64) -> Result<()> {
     require!(amount > 0, ErrorCode::InvalidAmount);

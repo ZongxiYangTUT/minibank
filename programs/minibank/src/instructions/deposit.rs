@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program::{transfer, Transfer};
 
 use crate::contexts::Deposit;
-use crate::errors::ErrorCode;
+use crate::error::ErrorCode;
 
 pub fn process(ctx: Context<Deposit>, account_id: u64, amount: u64) -> Result<()> {
     require!(amount > 0, ErrorCode::InvalidAmount);

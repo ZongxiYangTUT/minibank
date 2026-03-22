@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::{SEED_MINI_ACCOUNT, SEED_USER_STATS};
-use crate::errors::ErrorCode;
+use crate::error::ErrorCode;
 use crate::state::{MiniAccount, UserStats};
 
 #[derive(Accounts)]
