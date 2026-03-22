@@ -261,7 +261,8 @@ export default function App() {
     }
   }
 
-  async function refreshAccountsList(): Promise<ListedAccount[]> {
+  /** 链上 `miniAccount.all()` + 按当前钱包过滤，等价于「该钱包下全部储蓄账户」的 getAll */
+  async function fetchAllSavingsAccounts(): Promise<ListedAccount[]> {
     try {
       if (!program || !walletPublicKey) {
         setAccountsList([]);
@@ -307,11 +308,14 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (walletPublicKey && program && pda) {
-      /* 仅同步链上数据到界面，绝不写底部状态栏：否则任意晚到的 fetch 都会把「余额已刷新」盖在错误提示上 */
-      void refreshBalance(undefined, { updateStatus: false, showRefreshing: false });
+    if (walletPublicKey && program) {
+      /* 列表只依赖钱包 + Program，不必等当前选中账户的 PDA；一连上即可 getAll 储蓄账户 */
+      void fetchAllSavingsAccounts();
       refreshWalletBalance();
-      refreshAccountsList();
+      if (pda) {
+        /* 仅同步当前选中账户的链上余额，不写底部状态栏 */
+        void refreshBalance(undefined, { updateStatus: false, showRefreshing: false });
+      }
     }
     if (!walletPublicKey) {
       setBalance(null);
@@ -409,7 +413,7 @@ export default function App() {
       const newIdStr = nextIdBn.toString();
       setSelectedAccountId(newIdStr);
       await refreshBalance(newIdStr);
-      await refreshAccountsList();
+      await fetchAllSavingsAccounts();
       setShowCreateModal(false);
     } catch (e: any) {
       setAppStatus(friendlyError(e), "error");
@@ -449,7 +453,7 @@ export default function App() {
         .rpc();
       setSelectedAccountId(accountIdStr);
       await refreshBalance(accountIdStr);
-      await refreshAccountsList();
+      await fetchAllSavingsAccounts();
     } catch (e: any) {
       setAppStatus(friendlyError(e), "error");
     }
@@ -486,7 +490,7 @@ export default function App() {
         .rpc();
       setSelectedAccountId(accountIdStr);
       await refreshBalance(accountIdStr);
-      await refreshAccountsList();
+      await fetchAllSavingsAccounts();
     } catch (e: any) {
       setAppStatus(friendlyError(e), "error");
     }
@@ -524,7 +528,7 @@ export default function App() {
         })
         .rpc();
 
-      const listed = await refreshAccountsList();
+      const listed = await fetchAllSavingsAccounts();
       await refreshWalletBalance();
 
       if (listed.length === 0) {
@@ -670,26 +674,33 @@ export default function App() {
             </div>
             {walletPublicKey ? (
               <>
-                {walletState ? (
-                  <span
-                    className={`wallet-badge ${usingLocalSigner ? "wallet-badge--local" : ""}`}
-                  >
-                    {walletState}
-                  </span>
-                ) : null}
-                <div className="address-box">
-                  <span className="mono">{truncateAddress(walletPublicKey.toBase58())}</span>
-                  <button
-                    className="copy-btn"
-                    onClick={() => copyToClipboard(walletPublicKey.toBase58())}
-                    title="复制地址"
-                  >
-                    <CopyIcon />
-                  </button>
-                </div>
-                <div className="sol-balance">
-                  <SolIcon />
-                  <span>{walletSol} SOL</span>
+                <div className="wallet-summary-strip">
+                  {walletState ? (
+                    <span
+                      className={`wallet-badge ${usingLocalSigner ? "wallet-badge--local" : ""}`}
+                    >
+                      {walletState}
+                    </span>
+                  ) : null}
+                  <div className="address-box address-box--wallet">
+                    <span
+                      className="mono wallet-pubkey-line"
+                      title={walletPublicKey.toBase58()}
+                    >
+                      {truncateAddress(walletPublicKey.toBase58(), 6)}
+                    </span>
+                    <button
+                      className="copy-btn"
+                      onClick={() => copyToClipboard(walletPublicKey.toBase58())}
+                      title={t("copyAddressTitle")}
+                    >
+                      <CopyIcon />
+                    </button>
+                  </div>
+                  <div className="sol-balance">
+                    <SolIcon />
+                    <span>{walletSol} SOL</span>
+                  </div>
                 </div>
                 {walletSolFetchError ? (
                   <p className="wallet-sol-fetch-error">{t("walletSolFetchError", { message: walletSolFetchError })}</p>
@@ -749,7 +760,7 @@ export default function App() {
           >
             {isRefreshing ? "..." : t("refreshBalance")}
           </button>
-          <button onClick={refreshAccountsList} disabled={!canUseApp}>
+          <button onClick={() => void fetchAllSavingsAccounts()} disabled={!canUseApp}>
             {t("refreshList")}
           </button>
         </div>

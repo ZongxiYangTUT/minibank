@@ -94,11 +94,47 @@ body {
 
 .wallet-info {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   flex-wrap: wrap;
   flex: 1 1 340px;
   min-width: 280px;
+}
+
+/* 徽标 + 地址 + SOL：单行对齐，避免换行后 SOL 掉到下一行呈「台阶」 */
+.wallet-summary-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px 12px;
+  width: 100%;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.wallet-summary-strip .wallet-badge {
+  flex-shrink: 0;
+}
+
+.wallet-summary-strip .address-box.address-box--wallet {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: min(100%, 22rem);
+  align-items: center;
+}
+
+.wallet-summary-strip .address-box.address-box--wallet .wallet-pubkey-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+}
+
+.wallet-summary-strip .sol-balance {
+  flex-shrink: 0;
 }
 
 .wallet-toolbar {
@@ -601,9 +637,8 @@ input::placeholder {
     font-size: 1.4rem;
   }
 
-  .address-box {
-    width: 100%;
-    justify-content: space-between;
+  .wallet-summary-strip .address-box.address-box--wallet .wallet-pubkey-line {
+    font-size: 0.7rem;
   }
 
   .wallet-info {
