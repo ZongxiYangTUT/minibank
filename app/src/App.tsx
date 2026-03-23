@@ -13,8 +13,10 @@ const accountSeed = "mini_account";
 const userStatsSeed = "user_stats";
 const yieldVaultSeed = "yield_vault";
 const userYieldSeed = "user_yield";
-/** Must match `YIELD_APY_BPS` on-chain (500 = 5%). */
-const YIELD_APY_BPS = 500;
+/** Must match on-chain floating APY constants in `constants.rs`. */
+const MIN_YIELD_APY_BPS = 100;
+const MAX_YIELD_APY_BPS = 2000;
+const APY_RATIO_DIVISOR = 2;
 const SECONDS_PER_YEAR = 31_536_000;
 
 type MiniAccountData = {
@@ -57,14 +59,22 @@ function estimateYieldTotalLamports(
   principal: bigint,
   accrued: bigint,
   lastYieldTs: number,
-  nowSec: number
+  nowSec: number,
+  currentApyBps: number
 ): bigint {
   let pending = 0n;
   if (lastYieldTs > 0 && principal > 0n) {
     const elapsed = Math.max(0, Math.floor(nowSec - lastYieldTs));
-    pending = (principal * BigInt(YIELD_APY_BPS) * BigInt(elapsed)) / (10000n * BigInt(SECONDS_PER_YEAR));
+    pending = (principal * BigInt(currentApyBps) * BigInt(elapsed)) / (10000n * BigInt(SECONDS_PER_YEAR));
   }
   return principal + accrued + pending;
+}
+
+function dynamicApyBpsFromPool(rewardPoolLamports: bigint, totalPrincipalLamports: bigint): number {
+  if (totalPrincipalLamports <= 0n) return MIN_YIELD_APY_BPS;
+  const ratioBps = Number((rewardPoolLamports * 10_000n) / totalPrincipalLamports);
+  const dynamic = MIN_YIELD_APY_BPS + Math.floor(ratioBps / APY_RATIO_DIVISOR);
+  return Math.max(MIN_YIELD_APY_BPS, Math.min(MAX_YIELD_APY_BPS, dynamic));
 }
 
 function getYieldVaultPda(): PublicKey {
@@ -868,6 +878,9 @@ export default function App() {
   }
 
   const canUseApp = signerMode !== "none" && !!activeSigner && !!walletPublicKey && !!program;
+  const currentYieldApyBps = yieldVaultSummary
+    ? dynamicApyBpsFromPool(yieldVaultSummary.rewardPoolLamports, yieldVaultSummary.totalPrincipalLamports)
+    : MIN_YIELD_APY_BPS;
 
   return (
     <div className="container">
@@ -1112,7 +1125,7 @@ export default function App() {
       <div className="card" data-yield-tick={yieldUiTick}>
         <h2>{t("yieldTitle")}</h2>
         <p className="muted" style={{ fontSize: "0.9rem", marginBottom: 12 }}>
-          {t("yieldApyHint", { apy: (YIELD_APY_BPS / 100).toString() })}
+          {t("yieldApyHint", { apy: (currentYieldApyBps / 100).toFixed(2) })}
         </p>
         <div style={{ marginBottom: 12, fontSize: "0.9rem" }}>
           <span className="muted">{t("yieldVaultAddress")}: </span>
@@ -1167,7 +1180,8 @@ export default function App() {
                 userYieldPosition.principalLamports,
                 userYieldPosition.accruedYieldLamports,
                 userYieldPosition.lastYieldTs,
-                Math.floor(Date.now() / 1000)
+                Math.floor(Date.now() / 1000),
+                currentYieldApyBps
               ).toString()}
             </div>
           </div>

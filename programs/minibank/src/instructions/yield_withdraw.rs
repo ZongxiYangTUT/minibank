@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::contexts::YieldWithdraw;
 use crate::error::ErrorCode;
-use crate::yield_accrue::accrue_yield;
+use crate::yield_accrue::{accrue_yield, dynamic_apy_bps};
 
 pub fn process(ctx: Context<YieldWithdraw>, target_account_id: u64) -> Result<()> {
     require!(
@@ -17,16 +17,6 @@ pub fn process(ctx: Context<YieldWithdraw>, target_account_id: u64) -> Result<()
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
 
-    let uy = &mut ctx.accounts.user_yield;
-    accrue_yield(uy, now)?;
-
-    let principal = uy.principal_lamports;
-    let accrued = uy.accrued_yield_lamports;
-    require!(
-        principal > 0 || accrued > 0,
-        ErrorCode::NoYieldPosition
-    );
-
     let rent = Rent::get()?;
     let vault_space = 8 + crate::state::YieldVault::INIT_SPACE;
     let min_vault_rent = rent.minimum_balance(vault_space);
@@ -35,6 +25,17 @@ pub fn process(ctx: Context<YieldWithdraw>, target_account_id: u64) -> Result<()
         .lamports()
         .checked_sub(min_vault_rent)
         .ok_or(ErrorCode::MathOverflow)?;
+    let current_apy_bps = dynamic_apy_bps(available, ctx.accounts.yield_vault.total_principal_lamports);
+
+    let uy = &mut ctx.accounts.user_yield;
+    accrue_yield(uy, now, current_apy_bps)?;
+
+    let principal = uy.principal_lamports;
+    let accrued = uy.accrued_yield_lamports;
+    require!(
+        principal > 0 || accrued > 0,
+        ErrorCode::NoYieldPosition
+    );
     // Principal must always be withdrawable; yield only from liquidity not reserved as principal.
     require!(available >= principal, ErrorCode::YieldVaultInsufficient);
     let total_principal = ctx.accounts.yield_vault.total_principal_lamports;
@@ -79,11 +80,12 @@ pub fn process(ctx: Context<YieldWithdraw>, target_account_id: u64) -> Result<()
         .ok_or(ErrorCode::MathOverflow)?;
 
     msg!(
-        "Yield withdraw ok; paid {} lamports (principal {} + yield {} of accrued {})",
+        "Yield withdraw ok; paid {} lamports (principal {} + yield {} of accrued {}), dynamic apy {} bps",
         total,
         principal,
         paid_yield,
-        accrued
+        accrued,
+        current_apy_bps
     );
     Ok(())
 }

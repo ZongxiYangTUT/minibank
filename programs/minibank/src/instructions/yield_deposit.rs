@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::contexts::YieldDeposit;
 use crate::error::ErrorCode;
-use crate::yield_accrue::accrue_yield;
+use crate::yield_accrue::{accrue_yield, dynamic_apy_bps};
 
 pub fn process(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Result<()> {
     require!(amount > 0, ErrorCode::InvalidAmount);
@@ -38,9 +38,17 @@ pub fn process(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Resu
         ErrorCode::InvalidRecipient
     );
 
-    accrue_yield(uy, now)?;
-
     let vault_info = ctx.accounts.yield_vault.to_account_info();
+    let rent = Rent::get()?;
+    let vault_space = 8 + crate::state::YieldVault::INIT_SPACE;
+    let min_vault_rent = rent.minimum_balance(vault_space);
+    let available = vault_info
+        .lamports()
+        .checked_sub(min_vault_rent)
+        .ok_or(ErrorCode::MathOverflow)?;
+    let current_apy_bps = dynamic_apy_bps(available, ctx.accounts.yield_vault.total_principal_lamports);
+
+    accrue_yield(uy, now, current_apy_bps)?;
 
     let mini_lamports = mini_info
         .lamports()
@@ -73,6 +81,10 @@ pub fn process(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Resu
         .checked_add(amount)
         .ok_or(ErrorCode::MathOverflow)?;
 
-    msg!("Yield deposit ok; principal {}", uy.principal_lamports);
+    msg!(
+        "Yield deposit ok; principal {}, dynamic apy {} bps",
+        uy.principal_lamports,
+        current_apy_bps
+    );
     Ok(())
 }

@@ -53,6 +53,24 @@ The program now includes two additional instructions:
   - withdraws the full position back to the selected savings account
   - principal is guaranteed first; yield paid is capped by vault reward liquidity
 
+### Floating APY model
+
+This project uses a **floating APY** instead of a fixed APY.
+
+- Units are in **bps** (basis points):
+  - `1 bps = 0.01%`
+  - `100 bps = 1%`
+  - `10_000 bps = 100%`
+- Dynamic APY formula:
+  - `APY = clamp(MIN_APY + reward_pool_ratio_bps / APY_RATIO_DIVISOR, MIN_APY, MAX_APY)`
+  - `reward_pool_ratio_bps = reward_pool / total_principal * 10_000`
+- Current on-chain constants (see `programs/minibank/src/constants.rs`):
+  - `MIN_YIELD_APY_BPS = 100` (1.00%)
+  - `MAX_YIELD_APY_BPS = 2000` (20.00%)
+  - `APY_RATIO_DIVISOR = 2` (reduces sensitivity; APY reacts more smoothly to pool changes)
+
+In plain language: when reward pool grows relative to total principal, APY rises; when reward pool shrinks, APY moves back toward the minimum.
+
 Important accounting rule:
 
 - `YieldVault.total_principal_lamports` tracks the sum of all users' principal.
@@ -68,6 +86,16 @@ Yield does **not** appear from nowhere. For users to actually receive interest, 
 - Or transfer SOL directly to the `YieldVault` PDA address shown in the app.
 
 If reward pool is zero, users will still be able to redeem principal, but paid yield may be zero.
+
+### Quick test flow (recommended)
+
+1. Deposit some SOL from a savings account into yield (`yield_deposit`).
+2. Fund vault with extra SOL using **Fund vault / 注资收益池**.
+3. Wait 10s+ and refresh UI to see updated estimated APY/yield.
+4. Withdraw (`yield_withdraw`) back to a target savings account.
+5. Compare:
+   - principal always returns first
+   - paid yield is limited by current reward pool liquidity
 
 ## Frontend (`app/`)
 
