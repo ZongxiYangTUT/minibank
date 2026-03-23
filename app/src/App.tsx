@@ -15,8 +15,8 @@ const yieldVaultSeed = "yield_vault_v2";
 const userYieldSeed = "user_yield";
 /** Must match on-chain piecewise rate constants in `constants.rs`. */
 const RATE_BASE_BPS = 100;
-const RATE_SLOPE1_BPS = 400;
-const RATE_SLOPE2_BPS = 2000;
+const RATE_SLOPE1_BPS = 300;
+const RATE_SLOPE2_BPS = 3600;
 const RATE_KINK_UTIL_BPS = 8000;
 
 type MiniAccountData = {
@@ -1006,6 +1006,24 @@ export default function App() {
   }
 
   const canUseApp = signerMode !== "none" && !!activeSigner && !!walletPublicKey && !!program;
+  useEffect(() => {
+    if (canUseApp) {
+      setAppStatus(balanceRef.current ? t("balanceRefreshed") : t("statusIdle"), "default");
+      return;
+    }
+    if (signerMode === "none") {
+      setAppStatus(t("walletDisconnected"), "error");
+      return;
+    }
+    if (signerMode === "local" && !localReady) {
+      setAppStatus(t("localKeypairMissing"), "error");
+      return;
+    }
+    if (signerMode === "browser" && !browserReady) {
+      setAppStatus(t("walletDisconnected"), "error");
+    }
+  }, [canUseApp, signerMode, localReady, browserReady, t]);
+
   const currentUtilBps = yieldVaultSummary
     ? utilizationBps(yieldVaultSummary.totalAssetsLamports, yieldVaultSummary.totalBorrowedLamports)
     : 0;

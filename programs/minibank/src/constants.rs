@@ -9,7 +9,7 @@ pub const SEED_USER_YIELD: &[u8] = b"user_yield";
 
 /// Piecewise utilization model params in basis points.
 pub const RATE_BASE_BPS: u64 = 100; // 1%
-pub const RATE_SLOPE1_BPS: u64 = 400; // up to +4% before kink
-pub const RATE_SLOPE2_BPS: u64 = 2_000; // up to +20% after kink
+pub const RATE_SLOPE1_BPS: u64 = 300; // up to +3% before kink (slow ramp)
+pub const RATE_SLOPE2_BPS: u64 = 3_600; // up to +36% after kink (steep penalty)
 pub const RATE_KINK_UTIL_BPS: u64 = 8_000; // 80%
 pub const SECONDS_PER_YEAR: u64 = 31_536_000;
