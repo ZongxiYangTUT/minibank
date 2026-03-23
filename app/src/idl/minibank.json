@@ -1,5 +1,5 @@
 {
-  "address": "qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82",
+  "address": "9Sa5rGRUsm8SikPFcDYSCEAHLch1xdqSvK6A8xbhb6nr",
   "metadata": {
     "name": "minibank",
     "version": "0.1.0",
@@ -79,13 +79,7 @@
                 "account": "UserStats"
               }
             ]
-          },
-          "init": true,
-          "payer": {
-            "kind": "account",
-            "path": "payer"
-          },
-          "space": 92
+          }
         },
         {
           "name": "payer",
@@ -277,13 +271,7 @@
                 "path": "owner"
               }
             ]
-          },
-          "init": true,
-          "payer": {
-            "kind": "account",
-            "path": "owner"
-          },
-          "space": 16
+          }
         },
         {
           "name": "owner",
@@ -365,6 +353,244 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "yield_deposit",
+      "discriminator": [
+        197,
+        128,
+        119,
+        222,
+        188,
+        102,
+        165,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "mini_account"
+          ]
+        },
+        {
+          "name": "mini_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "account_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_yield",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  121,
+                  105,
+                  101,
+                  108,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "yield_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  105,
+                  101,
+                  108,
+                  100,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "yield_withdraw",
+      "discriminator": [
+        225,
+        135,
+        226,
+        199,
+        89,
+        96,
+        95,
+        196
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "user_yield",
+            "dest_mini_account"
+          ]
+        },
+        {
+          "name": "user_yield",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  121,
+                  105,
+                  101,
+                  108,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "yield_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  105,
+                  101,
+                  108,
+                  100,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "dest_mini_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "target_account_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "target_account_id",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -392,6 +618,32 @@
         79,
         32,
         227
+      ]
+    },
+    {
+      "name": "UserYieldPosition",
+      "discriminator": [
+        21,
+        8,
+        11,
+        157,
+        247,
+        222,
+        214,
+        43
+      ]
+    },
+    {
+      "name": "YieldVault",
+      "discriminator": [
+        17,
+        229,
+        96,
+        254,
+        254,
+        179,
+        195,
+        163
       ]
     }
   ],
@@ -440,6 +692,21 @@
       "code": 6008,
       "name": "InvalidAccountId",
       "msg": "Account id does not match instruction"
+    },
+    {
+      "code": 6009,
+      "name": "NoYieldPosition",
+      "msg": "No 余额宝 position to withdraw"
+    },
+    {
+      "code": 6010,
+      "name": "YieldVaultInsufficient",
+      "msg": "Yield vault does not have enough lamports for principal and interest"
+    },
+    {
+      "code": 6011,
+      "name": "YieldVaultAccountingMismatch",
+      "msg": "Yield vault total_principal does not match expected invariants"
     }
   ],
   "types": [
@@ -474,6 +741,58 @@
         "fields": [
           {
             "name": "next_account_id",
+            "docs": [
+              "Next `account_id` to allocate when creating a new savings account."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserYieldPosition",
+      "docs": [
+        "Per-owner 余额宝 position: principal in the vault + accrued yield (simple interest on principal)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "principal_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "accrued_yield_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "last_yield_ts",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldVault",
+      "docs": [
+        "Global vault PDA that holds all 余额宝 principal plus reward pool lamports.",
+        "",
+        "`total_principal_lamports` must equal the sum of all [`UserYieldPosition::principal_lamports`].",
+        "Reward liquidity = `vault.lamports() - rent_exempt - total_principal_lamports` (funded by transfers in)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "total_principal_lamports",
             "type": "u64"
           }
         ]

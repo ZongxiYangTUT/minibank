@@ -5,3 +5,5 @@ pub mod delete_account;
 pub mod deposit;
 pub mod init_user_stats;
 pub mod withdraw;
+pub mod yield_deposit;
+pub mod yield_withdraw;

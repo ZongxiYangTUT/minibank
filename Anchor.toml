@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-minibank = "qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82"
+minibank = "9Sa5rGRUsm8SikPFcDYSCEAHLch1xdqSvK6A8xbhb6nr"
 
 [programs.localnet]
-minibank = "qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82"
+minibank = "9Sa5rGRUsm8SikPFcDYSCEAHLch1xdqSvK6A8xbhb6nr"
 
 [registry]
 url = "https://api.apr.dev"

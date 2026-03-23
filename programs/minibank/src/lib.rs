@@ -7,12 +7,13 @@ pub mod contexts;
 pub mod error;
 pub mod instructions;
 pub mod state;
+pub mod yield_accrue;
 
 pub use contexts::*;
 pub use error::ErrorCode;
-pub use state::{MiniAccount, UserStats};
+pub use state::{MiniAccount, UserStats, UserYieldPosition, YieldVault};
 
-declare_id!("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
+declare_id!("9Sa5rGRUsm8SikPFcDYSCEAHLch1xdqSvK6A8xbhb6nr");
 
 #[program]
 pub mod minibank {
@@ -36,5 +37,13 @@ pub mod minibank {
 
     pub fn delete_account(ctx: Context<DeleteAccount>, account_id: u64) -> Result<()> {
         instructions::delete_account::process(ctx, account_id)
+    }
+
+    pub fn yield_deposit(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Result<()> {
+        instructions::yield_deposit::process(ctx, account_id, amount)
+    }
+
+    pub fn yield_withdraw(ctx: Context<YieldWithdraw>, target_account_id: u64) -> Result<()> {
+        instructions::yield_withdraw::process(ctx, target_account_id)
     }
 }

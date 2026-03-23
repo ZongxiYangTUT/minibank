@@ -20,4 +20,10 @@ pub enum ErrorCode {
     InsufficientVaultLamports,
     #[msg("Account id does not match instruction")]
     InvalidAccountId,
+    #[msg("No 余额宝 position to withdraw")]
+    NoYieldPosition,
+    #[msg("Yield vault does not have enough lamports for principal and interest")]
+    YieldVaultInsufficient,
+    #[msg("Yield vault total_principal does not match expected invariants")]
+    YieldVaultAccountingMismatch,
 }

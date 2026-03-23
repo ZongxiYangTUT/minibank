@@ -1,6 +1,6 @@
 # Minibank
 
-A minimal **Solana + Anchor** demo: per-user savings accounts (`MiniAccount` PDAs), deposits, withdrawals, and account close. Includes a **React + Vite** UI with wallet or local keypair signing.
+A minimal **Solana + Anchor** demo: per-user savings accounts (`MiniAccount` PDAs), deposits, withdrawals, account close, and a **余额宝-like yield position** backed by a global vault. Includes a **React + Vite** UI with wallet or local keypair signing.
 
 ## Repository layout
 
@@ -35,10 +35,39 @@ The deployed program id must match `declare_id!` in `programs/minibank/src/lib.r
 
 - `programs/minibank/src/lib.rs` — program entry and `#[program]` dispatch
 - `instructions/` — per-instruction handlers
-- `state/` — `#[account]` structs (`MiniAccount`, `UserStats`)
+- `state/` — `#[account]` structs (`MiniAccount`, `UserStats`, `UserYieldPosition`, `YieldVault`)
 - `contexts.rs` — `#[derive(Accounts)]` validation contexts (named `contexts` because `#[program]` macro reserves a `accounts` module name at the crate root)
 - `error.rs` — `#[error_code]`
 - `constants.rs` — seeds and limits
+
+### Yield feature (余额宝-style)
+
+The program now includes two additional instructions:
+
+- `yield_deposit(account_id, amount)`:
+  - moves lamports from the selected `MiniAccount` PDA to global `YieldVault` PDA
+  - decreases `mini_account.balance`
+  - increases user principal in `UserYieldPosition`
+- `yield_withdraw(target_account_id)`:
+  - accrues interest up to `Clock::unix_timestamp`
+  - withdraws the full position back to the selected savings account
+  - principal is guaranteed first; yield paid is capped by vault reward liquidity
+
+Important accounting rule:
+
+- `YieldVault.total_principal_lamports` tracks the sum of all users' principal.
+- Reward pool is computed as:
+  - `reward_pool = vault_lamports - rent_exempt - total_principal_lamports`
+- This avoids paying one user's yield using another user's principal.
+
+### Funding the reward pool
+
+Yield does **not** appear from nowhere. For users to actually receive interest, someone must add SOL to the global vault beyond principal:
+
+- In UI: use **Fund vault / 注资收益池** in the yield card.
+- Or transfer SOL directly to the `YieldVault` PDA address shown in the app.
+
+If reward pool is zero, users will still be able to redeem principal, but paid yield may be zero.
 
 ## Frontend (`app/`)
 
@@ -70,6 +99,8 @@ Copy `app/.env.example` to `app/.env.local` and adjust.
 ### IDL sync
 
 After changing the program, run `anchor build` and copy the generated `target/idl/minibank.json` to `app/src/idl/minibank.json` (or your bundler path) so the client matches the on-chain IDL.
+
+When account layout changes (for example, adding fields to `YieldVault`), make sure existing on-chain accounts are migrated/recreated in your test environment.
 
 ## License
 

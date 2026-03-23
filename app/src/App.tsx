@@ -8,9 +8,14 @@ import { useTranslation } from "react-i18next";
 import idl from "./idl/minibank.json";
 import { SolanaNetwork, useSolanaNetwork } from "./SolanaWalletProvider";
 
-const programId = new PublicKey("qBgWbfhi9cWqYRDQABUWdtd2NQA69kRVXeJEkpoEM82");
+const programId = new PublicKey("9Sa5rGRUsm8SikPFcDYSCEAHLch1xdqSvK6A8xbhb6nr");
 const accountSeed = "mini_account";
 const userStatsSeed = "user_stats";
+const yieldVaultSeed = "yield_vault";
+const userYieldSeed = "user_yield";
+/** Must match `YIELD_APY_BPS` on-chain (500 = 5%). */
+const YIELD_APY_BPS = 500;
+const SECONDS_PER_YEAR = 31_536_000;
 
 type MiniAccountData = {
   name: string;
@@ -39,6 +44,38 @@ function lamportsToSolStr(lamports: bigint): string {
   const frac = lamports % 1_000_000_000n;
   const fracStr = frac.toString().padStart(9, "0");
   return `${whole.toString()}.${fracStr}`;
+}
+
+type UserYieldPositionData = {
+  principalLamports: bigint;
+  accruedYieldLamports: bigint;
+  lastYieldTs: number;
+};
+
+/** Simple-interest pending accrual since `lastYieldTs` (matches on-chain `accrue_yield`). */
+function estimateYieldTotalLamports(
+  principal: bigint,
+  accrued: bigint,
+  lastYieldTs: number,
+  nowSec: number
+): bigint {
+  let pending = 0n;
+  if (lastYieldTs > 0 && principal > 0n) {
+    const elapsed = Math.max(0, Math.floor(nowSec - lastYieldTs));
+    pending = (principal * BigInt(YIELD_APY_BPS) * BigInt(elapsed)) / (10000n * BigInt(SECONDS_PER_YEAR));
+  }
+  return principal + accrued + pending;
+}
+
+function getYieldVaultPda(): PublicKey {
+  return PublicKey.findProgramAddressSync([new TextEncoder().encode(yieldVaultSeed)], programId)[0];
+}
+
+function getUserYieldPda(owner: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode(userYieldSeed), owner.toBuffer()],
+    programId
+  )[0];
 }
 
 type SignerMode = "none" | "browser" | "local";
@@ -149,6 +186,18 @@ export default function App() {
 
   const [selectedAccountId, setSelectedAccountId] = useState<string>("0");
 
+  const [yieldDepositAmount, setYieldDepositAmount] = useState<string>("0.1");
+  const [yieldFundAmount, setYieldFundAmount] = useState<string>("0.1");
+  const [yieldSourceAccountId, setYieldSourceAccountId] = useState<string>("0");
+  const [yieldDestAccountId, setYieldDestAccountId] = useState<string>("0");
+  const [userYieldPosition, setUserYieldPosition] = useState<UserYieldPositionData | null>(null);
+  const [yieldVaultSummary, setYieldVaultSummary] = useState<{
+    totalPrincipalLamports: bigint;
+    rewardPoolLamports: bigint;
+  } | null>(null);
+  /** Bumps every 10s so estimated yield re-renders without polling chain. */
+  const [yieldUiTick, setYieldUiTick] = useState(0);
+
   /** Close create modal only when mousedown and mouseup both target the backdrop (not drag-select from inputs). */
   const createModalBackdropMouseDownRef = useRef(false);
 
@@ -168,6 +217,20 @@ export default function App() {
     }
     if (raw.includes("InvalidAccountId") || raw.includes("Account id does not match")) {
       return t("invalidAccountId");
+    }
+    if (raw.includes("NoYieldPosition") || raw.includes("No 余额宝")) {
+      return i18n.language === "zh" ? "暂无余额宝持仓" : "No yield position";
+    }
+    if (raw.includes("YieldVaultInsufficient") || raw.includes("Yield vault does not have enough")) {
+      return i18n.language === "zh" ? "收益池 SOL 不足，请先向 Vault 地址转入" : "Yield vault has insufficient SOL; fund the vault";
+    }
+    if (raw.includes("YieldVaultAccountingMismatch") || raw.includes("total_principal")) {
+      return i18n.language === "zh"
+        ? "Vault 账目异常（需重新部署或重置链上 YieldVault 账户）"
+        : "Yield vault accounting mismatch (reset/redeploy may be required)";
+    }
+    if (raw.includes("insufficient funds")) {
+      return i18n.language === "zh" ? "钱包余额不足（含手续费）" : "Insufficient wallet SOL (including fee)";
     }
     return raw || t("txFailed");
   }
@@ -307,10 +370,73 @@ export default function App() {
     }
   }
 
+  async function fetchYieldVaultSummary() {
+    if (!program) {
+      setYieldVaultSummary(null);
+      return;
+    }
+    const vaultPk = getYieldVaultPda();
+    try {
+      const v = await (program.account as any).yieldVault.fetchNullable(vaultPk);
+      if (!v) {
+        setYieldVaultSummary(null);
+        return;
+      }
+      const totalP = BigInt((v.totalPrincipalLamports ?? v.total_principal_lamports).toString());
+      const info = await connection.getAccountInfo(vaultPk, "confirmed");
+      const dataLen = info?.data.length ?? 17;
+      const minRent = BigInt(await connection.getMinimumBalanceForRentExemption(dataLen, "confirmed"));
+      const lamports = BigInt(await connection.getBalance(vaultPk, "confirmed"));
+      const available = lamports > minRent ? lamports - minRent : 0n;
+      const rewardPool = available > totalP ? available - totalP : 0n;
+      setYieldVaultSummary({ totalPrincipalLamports: totalP, rewardPoolLamports: rewardPool });
+    } catch {
+      setYieldVaultSummary(null);
+    }
+  }
+
+  async function fetchUserYield() {
+    if (!program || !walletPublicKey) {
+      setUserYieldPosition(null);
+      return;
+    }
+    const pda = getUserYieldPda(walletPublicKey);
+    try {
+      const y = await (program.account as any).userYieldPosition.fetchNullable(pda);
+      if (!y) {
+        setUserYieldPosition(null);
+        return;
+      }
+      const pr = y.principalLamports ?? y.principal_lamports;
+      const ac = y.accruedYieldLamports ?? y.accrued_yield_lamports;
+      const ts = y.lastYieldTs ?? y.last_yield_ts;
+      setUserYieldPosition({
+        principalLamports: BigInt(pr.toString()),
+        accruedYieldLamports: BigInt(ac.toString()),
+        lastYieldTs: Number(ts.toString())
+      });
+    } catch {
+      setUserYieldPosition(null);
+    }
+  }
+
+  useEffect(() => {
+    setYieldSourceAccountId(selectedAccountId);
+    setYieldDestAccountId(selectedAccountId);
+  }, [selectedAccountId]);
+
+  useEffect(() => {
+    if (!walletPublicKey || !program) return;
+    const id = window.setInterval(() => setYieldUiTick((n) => n + 1), 10_000);
+    return () => clearInterval(id);
+  }, [walletPublicKey, program]);
+
   useEffect(() => {
     if (walletPublicKey && program) {
       /* List needs wallet + program only; no need to wait for selected-account PDA. */
       void fetchAllSavingsAccounts();
+      void fetchUserYield();
+      void fetchYieldVaultSummary();
       refreshWalletBalance();
       if (pda) {
         /* Sync selected account balance from chain; do not touch bottom status line. */
@@ -319,6 +445,7 @@ export default function App() {
     }
     if (!walletPublicKey) {
       setBalance(null);
+      setYieldVaultSummary(null);
       setAppStatus(t("walletDisconnected"), "error");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -491,6 +618,128 @@ export default function App() {
       setSelectedAccountId(accountIdStr);
       await refreshBalance(accountIdStr);
       await fetchAllSavingsAccounts();
+    } catch (e: any) {
+      setAppStatus(friendlyError(e), "error");
+    }
+  }
+
+  async function handleYieldDeposit() {
+    if (!program || !walletPublicKey) return;
+    const accountIdBn = parseU64ToBN(yieldSourceAccountId);
+    if (!accountIdBn) return;
+    const pdaForOp = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(accountIdBn)
+      ],
+      programId
+    )[0];
+    const lamports = parseSolToLamports(yieldDepositAmount);
+    if (lamports <= 0n) {
+      setAppStatus(t("invalidAmount"), "error");
+      return;
+    }
+
+    const userYieldPda = getUserYieldPda(walletPublicKey);
+    const yieldVaultPda = getYieldVaultPda();
+
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("statusYieldDepositing"), "default");
+    try {
+      await program.methods
+        .yieldDeposit(accountIdBn, new BN(lamports.toString()))
+        .accounts({
+          owner: walletPublicKey,
+          miniAccount: pdaForOp,
+          userYield: userYieldPda,
+          yieldVault: yieldVaultPda,
+          systemProgram: SystemProgram.programId
+        })
+        .rpc();
+      await fetchUserYield();
+      await fetchYieldVaultSummary();
+      await fetchAllSavingsAccounts();
+      await refreshBalance(yieldSourceAccountId);
+      setAppStatus(t("balanceRefreshed"), "default");
+    } catch (e: any) {
+      setAppStatus(friendlyError(e), "error");
+    }
+  }
+
+  async function handleFundYieldVault() {
+    if (!walletPublicKey || !activeSigner) return;
+    const lamports = parseSolToLamports(yieldFundAmount);
+    if (lamports <= 0n) {
+      setAppStatus(t("invalidAmount"), "error");
+      return;
+    }
+    const lamportsNum = Number(lamports);
+    if (!Number.isSafeInteger(lamportsNum)) {
+      setAppStatus(t("invalidAmount"), "error");
+      return;
+    }
+
+    const yieldVaultPda = getYieldVaultPda();
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("statusFundingYield"), "default");
+    try {
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      const tx = new Transaction({
+        feePayer: walletPublicKey,
+        recentBlockhash: blockhash
+      }).add(
+        SystemProgram.transfer({
+          fromPubkey: walletPublicKey,
+          toPubkey: yieldVaultPda,
+          lamports: lamportsNum
+        })
+      );
+      const signed = await activeSigner.signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      await refreshWalletBalance();
+      await fetchYieldVaultSummary();
+      setAppStatus(t("balanceRefreshed"), "default");
+    } catch (e: any) {
+      setAppStatus(friendlyError(e), "error");
+    }
+  }
+
+  async function handleYieldWithdraw() {
+    if (!program || !walletPublicKey) return;
+    const targetBn = parseU64ToBN(yieldDestAccountId);
+    if (!targetBn) return;
+
+    const pdaDest = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(targetBn)
+      ],
+      programId
+    )[0];
+    const userYieldPda = getUserYieldPda(walletPublicKey);
+    const yieldVaultPda = getYieldVaultPda();
+
+    invalidatePendingBalanceFetch();
+    setAppStatus(t("statusYieldWithdrawing"), "default");
+    try {
+      await program.methods
+        .yieldWithdraw(targetBn)
+        .accounts({
+          owner: walletPublicKey,
+          userYield: userYieldPda,
+          yieldVault: yieldVaultPda,
+          destMiniAccount: pdaDest,
+          systemProgram: SystemProgram.programId
+        })
+        .rpc();
+      setUserYieldPosition(null);
+      await fetchYieldVaultSummary();
+      await fetchAllSavingsAccounts();
+      await refreshBalance(yieldDestAccountId);
+      setAppStatus(t("balanceRefreshed"), "default");
     } catch (e: any) {
       setAppStatus(friendlyError(e), "error");
     }
@@ -858,6 +1107,123 @@ export default function App() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="card" data-yield-tick={yieldUiTick}>
+        <h2>{t("yieldTitle")}</h2>
+        <p className="muted" style={{ fontSize: "0.9rem", marginBottom: 12 }}>
+          {t("yieldApyHint", { apy: (YIELD_APY_BPS / 100).toString() })}
+        </p>
+        <div style={{ marginBottom: 12, fontSize: "0.9rem" }}>
+          <span className="muted">{t("yieldVaultAddress")}: </span>
+          <span className="mono">{truncateAddress(getYieldVaultPda().toBase58(), 8)}</span>
+          <button
+            className="copy-btn"
+            type="button"
+            onClick={() => copyToClipboard(getYieldVaultPda().toBase58())}
+            title={t("copyAddressTitle")}
+          >
+            <CopyIcon />
+          </button>
+        </div>
+        <p className="muted" style={{ fontSize: "0.85rem", marginBottom: 16 }}>
+          {t("yieldVaultHint")}
+        </p>
+
+        <div className="field">
+          <label>{t("yieldFundAmount")}</label>
+          <input
+            value={yieldFundAmount}
+            onChange={(e) => setYieldFundAmount(e.target.value)}
+            placeholder="0.1"
+          />
+        </div>
+        <div className="row" style={{ marginBottom: 16 }}>
+          <button className="primary" type="button" onClick={() => void handleFundYieldVault()} disabled={!canUseApp}>
+            {t("yieldFundBtn")}
+          </button>
+        </div>
+
+        {yieldVaultSummary ? (
+          <div className="muted" style={{ marginBottom: 12, fontSize: "0.9rem" }}>
+            <div>
+              {t("yieldRewardPool")}: {yieldVaultSummary.rewardPoolLamports.toString()}
+            </div>
+            <div style={{ marginTop: 6, fontSize: "0.85rem" }}>{t("yieldRewardPoolHint")}</div>
+          </div>
+        ) : null}
+
+        {userYieldPosition ? (
+          <div style={{ marginBottom: 16 }}>
+            <div className="muted" style={{ marginBottom: 4 }}>
+              {t("yieldPrincipal")}: {userYieldPosition.principalLamports.toString()}
+            </div>
+            <div className="muted" style={{ marginBottom: 4 }}>
+              {t("yieldAccrued")}: {userYieldPosition.accruedYieldLamports.toString()}
+            </div>
+            <div style={{ fontWeight: 600 }}>
+              {t("yieldEstimatedTotal")}:{" "}
+              {estimateYieldTotalLamports(
+                userYieldPosition.principalLamports,
+                userYieldPosition.accruedYieldLamports,
+                userYieldPosition.lastYieldTs,
+                Math.floor(Date.now() / 1000)
+              ).toString()}
+            </div>
+          </div>
+        ) : (
+          <div className="muted" style={{ marginBottom: 16 }}>
+            {t("yieldNoPosition")}
+          </div>
+        )}
+
+        <div className="field">
+          <label>{t("yieldFromAccount")}</label>
+          <select
+            value={yieldSourceAccountId}
+            onChange={(e) => setYieldSourceAccountId(e.target.value)}
+            disabled={!canUseApp || accountsList.length === 0}
+          >
+            {accountsList.map((a) => (
+              <option key={a.accountId} value={a.accountId}>
+                #{a.accountId} · {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label>{t("amountSol")}</label>
+          <input
+            value={yieldDepositAmount}
+            onChange={(e) => setYieldDepositAmount(e.target.value)}
+            placeholder="0.1"
+          />
+        </div>
+        <div className="row" style={{ marginBottom: 16 }}>
+          <button className="primary" type="button" onClick={() => void handleYieldDeposit()} disabled={!canUseApp}>
+            {t("yieldDepositBtn")}
+          </button>
+        </div>
+
+        <div className="field">
+          <label>{t("yieldToAccount")}</label>
+          <select
+            value={yieldDestAccountId}
+            onChange={(e) => setYieldDestAccountId(e.target.value)}
+            disabled={!canUseApp || accountsList.length === 0}
+          >
+            {accountsList.map((a) => (
+              <option key={a.accountId} value={a.accountId}>
+                #{a.accountId} · {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="row">
+          <button type="button" onClick={() => void handleYieldWithdraw()} disabled={!canUseApp}>
+            {t("yieldWithdrawBtn")}
+          </button>
+        </div>
       </div>
 
       <div className={`status ${statusLine.tone === "error" ? "status--error" : ""}`}>
