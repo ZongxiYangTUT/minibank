@@ -66,15 +66,72 @@ The pool includes borrow-side accounting:
 - `borrow(target_account_id, amount)`
 - `repay(source_account_id, amount)`
 
-Interest is accrued globally before state-changing ops (`deposit/withdraw/borrow/repay`):
+Interest is accrued globally before state-changing ops (`deposit/withdraw/borrow/repay`).
 
-- `utilization = total_borrowed / total_assets`
-- piecewise borrow rate (`base + slope1/slope2` with kink)
-- accrued interest increases both:
-  - `total_borrowed` (liability side)
-  - `total_assets` (supplier side yield source)
+### APY / interest math (detailed)
 
-This implements automatic compounding at pool level.
+All rates are integer math in **bps** (basis points):
+
+- `1% = 100 bps`
+- `100% = 10_000 bps`
+
+Current on-chain constants (`programs/minibank/src/constants.rs`):
+
+- `RATE_BASE_BPS = 100` (1%)
+- `RATE_SLOPE1_BPS = 300` (kink 前最多 +3%)
+- `RATE_SLOPE2_BPS = 3600` (kink 后最多 +36%)
+- `RATE_KINK_UTIL_BPS = 8000` (80%)
+- `SECONDS_PER_YEAR = 31_536_000`
+
+#### 1) Utilization
+
+- `util_bps = min(10_000, total_borrowed * 10_000 / total_assets)`
+- When `total_assets == 0`, utilization is treated as `0`.
+
+#### 2) Borrow APY (piecewise kink model)
+
+If `util_bps <= kink`:
+
+- `borrow_rate_bps = base + util_bps * slope1 / kink`
+
+If `util_bps > kink`:
+
+- `tail_util = util_bps - kink`
+- `tail_range = 10_000 - kink`
+- `borrow_rate_bps = base + slope1 + tail_util * slope2 / tail_range`
+
+With current params, this yields approximately:
+
+- `util=0%`   -> borrow APY `1%`
+- `util=80%`  -> borrow APY `4%`
+- `util=100%` -> borrow APY `40%`
+
+So it is intentionally:
+
+- **slow increase** under 80%
+- **steep penalty** above 80%
+
+#### 3) Supplier APY (display logic)
+
+Frontend displays supply APY as:
+
+- `supply_rate_bps = borrow_rate_bps * util_bps / 10_000`
+
+This mirrors the common pool intuition: suppliers earn from borrower interest weighted by utilization.
+
+#### 4) Time-based accrual (global compounding)
+
+On each accrual:
+
+- `elapsed = now - last_accrual_ts`
+- `delta = total_borrowed * borrow_rate_bps * elapsed / 10_000 / SECONDS_PER_YEAR`
+
+Then both vault sides are increased by the same `delta`:
+
+- `total_borrowed += delta`
+- `total_assets += delta`
+
+This keeps accounting consistent and compounds yield at the pool level.
 
 ### Funding the reward pool
 

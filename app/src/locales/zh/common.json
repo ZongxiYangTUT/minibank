@@ -41,7 +41,7 @@
   "deleteNonZero": "关闭失败：账户余额不为 0，请先提到 0 再关闭",
   "txFailed": "交易失败，请检查参数后重试",
   "langLabel": "语言",
-  "langZh": "中文",
+  "langZh": "简体中文",
   "langEn": "English",
   "loadingDots": "...",
   "airdropConfirmed": "空投已确认",
@@ -76,7 +76,7 @@
   "yieldFundAmount": "向收益池转入 (SOL)",
   "yieldFundBtn": "注资收益池",
   "statusFundingYield": "正在向收益池转账…",
-  "borrowSectionTitle": "借贷操作",
+  "borrowSectionTitle": "借贷",
   "borrowToAccount": "借出到储蓄账户",
   "repayFromAccount": "从储蓄账户还款",
   "lendingAccount": "借贷操作账户",
@@ -86,5 +86,5 @@
   "yieldTransferAccount": "操作账户",
   "moduleOverview": "总览",
   "moduleSavings": "储蓄账户",
-  "moduleYield": "余额宝借贷"
+  "moduleYield": "余额宝"
 }

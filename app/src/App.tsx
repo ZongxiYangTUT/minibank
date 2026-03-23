@@ -88,8 +88,9 @@ function getUserYieldPda(owner: PublicKey): PublicKey {
 }
 
 type SignerMode = "none" | "browser" | "local";
-type ModuleView = "savings" | "yield";
-type YieldActionTab = "deposit" | "withdraw" | "lending";
+type ModuleView = "savings" | "yield" | "lending";
+type YieldActionTab = "deposit" | "withdraw";
+type YieldModalAction = "deposit" | "withdraw" | null;
 
 export default function App() {
   const { t, i18n } = useTranslation();
@@ -214,7 +215,7 @@ export default function App() {
   const [yieldUiTick, setYieldUiTick] = useState(0);
   const [activeModule, setActiveModule] = useState<ModuleView>("savings");
   const [yieldActionTab, setYieldActionTab] = useState<YieldActionTab>("deposit");
-  const [showAdvancedYield, setShowAdvancedYield] = useState(false);
+  const [yieldModalAction, setYieldModalAction] = useState<YieldModalAction>(null);
 
   /** Close create modal only when mousedown and mouseup both target the backdrop (not drag-select from inputs). */
   const createModalBackdropMouseDownRef = useRef(false);
@@ -1045,49 +1046,51 @@ export default function App() {
   const canBorrowNow = canUseApp && lendingAmountLamports > 0n;
   const canRepayNow = canUseApp && hasOutstandingDebt && lendingAmountLamports > 0n && lendingAmountLamports <= lendingAccountBalanceLamports;
 
-  function fillMaxForCurrentTab() {
-    if (yieldActionTab === "lending") {
-      const outstandingDebtLamports = yieldVaultSummary?.totalBorrowedLamports ?? 0n;
-      const repayMaxLamports =
-        lendingAccountBalanceLamports < outstandingDebtLamports
-          ? lendingAccountBalanceLamports
-          : outstandingDebtLamports;
-      setLendingAmount(lamportsToSolStr(repayMaxLamports));
-      return;
-    }
+  function fillMaxForYieldTab() {
     setYieldAmount(lamportsToSolStr(selectedSavingsBalanceLamports));
+  }
+
+  function fillMaxForLending() {
+    const outstandingDebtLamports = yieldVaultSummary?.totalBorrowedLamports ?? 0n;
+    const repayMaxLamports =
+      lendingAccountBalanceLamports < outstandingDebtLamports
+        ? lendingAccountBalanceLamports
+        : outstandingDebtLamports;
+    setLendingAmount(lamportsToSolStr(repayMaxLamports));
+  }
+
+  function openYieldModal(action: YieldActionTab) {
+    if (accountsList.length > 0 && !accountsList.some((a) => a.accountId === yieldAccountId)) {
+      setYieldAccountId(accountsList[0].accountId);
+    }
+    setYieldActionTab(action);
+    setYieldModalAction(action);
   }
 
   return (
     <div className="container">
-      <div className="lang-corner">
-        <label className="lang-select-wrap">
-          <span>{t("langLabel")}</span>
-          <select
-            className="lang-select"
-            value={i18n.language.startsWith("zh") ? "zh" : "en"}
-            onChange={(e) => i18n.changeLanguage(e.target.value)}
-          >
-            <option value="zh">{t("langZh")}</option>
-            <option value="en">{t("langEn")}</option>
-          </select>
-        </label>
-      </div>
-
-      <header className="app-header">
-        <h1 className="app-logo">{t("title")}</h1>
-        <div className="header-actions">
-          <div className="wallet-info">
-            <div className="wallet-toolbar">
+      <div className="app-main">
+        <header className="app-header">
+          <h1 className="app-logo">{t("title")}</h1>
+          <div className="header-actions">
+            <div className="wallet-info">
+              <div className="wallet-toolbar">
               <div className="connect-entry">
                 <button
                   className="connect-btn"
-                  onClick={() => setShowConnectMenu((v) => !v)}
+                  onClick={() => {
+                    if (signerMode !== "none") {
+                      void handleDisconnectCurrentMode();
+                      setShowConnectMenu(false);
+                      return;
+                    }
+                    setShowConnectMenu((v) => !v);
+                  }}
                   type="button"
                 >
-                  {t("connect")}
+                  {signerMode !== "none" ? t("disconnectWallet") : t("connect")}
                 </button>
-                {showConnectMenu ? (
+                {showConnectMenu && signerMode === "none" ? (
                   <div className="connect-menu">
                     <button type="button" onClick={() => handleConnectWithMode("browser")}>
                       {t("signerBrowserWallet")}
@@ -1099,20 +1102,36 @@ export default function App() {
                 ) : null}
               </div>
               <label className="toolbar-select-wrap">
-                <span>{t("network")}</span>
                 <select
                   className="toolbar-select"
                   value={selectedNetwork}
                   onChange={(e) => setSelectedNetwork(e.target.value as SolanaNetwork)}
+                  aria-label={t("network")}
+                  title={t("network")}
                 >
                   <option value="devnet">Devnet</option>
                   <option value="localhost">Localhost</option>
                 </select>
               </label>
+              <label className="toolbar-select-wrap toolbar-select-wrap--lang">
+                <select
+                  className="toolbar-select"
+                  value={i18n.language.startsWith("zh") ? "zh" : "en"}
+                  onChange={(e) => i18n.changeLanguage(e.target.value)}
+                  aria-label={t("langLabel")}
+                  title={t("langLabel")}
+                >
+                  <option value="zh">{t("langZh")}</option>
+                  <option value="en">{t("langEn")}</option>
+                </select>
+              </label>
+              <button className="primary" onClick={handleAirdrop} disabled={!canUseApp}>
+                {t("airdrop")}
+              </button>
             </div>
-            {walletPublicKey ? (
-              <>
-                <div className="wallet-summary-strip">
+              {walletPublicKey ? (
+                <>
+                  <div className="wallet-summary-strip">
                   {walletState ? (
                     <span
                       className={`wallet-badge ${usingLocalSigner ? "wallet-badge--local" : ""}`}
@@ -1140,294 +1159,288 @@ export default function App() {
                     <span>{walletSol} SOL</span>
                   </div>
                 </div>
-                {walletSolFetchError ? (
-                  <p className="wallet-sol-fetch-error">{t("walletSolFetchError", { message: walletSolFetchError })}</p>
-                ) : null}
-                {addressMismatch && usingLocalSigner ? (
-                  <p className="wallet-address-mismatch">
-                    {t("addressMismatchHint", {
-                      phantom: publicKey?.toBase58() ?? "",
-                      local: localKeypair?.publicKey.toBase58() ?? ""
-                    })}
-                  </p>
-                ) : null}
-              </>
-            ) : (
-              <span style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                {signerMode === "local" && !localKeypair
-                  ? t("localKeypairMissing")
-                  : signerMode === "browser"
-                    ? t("walletDisconnected")
-                    : t("notConfigured")}
-              </span>
-            )}
-          </div>
-          <div className="row">
-            <button className="primary" onClick={handleAirdrop} disabled={!canUseApp}>
-              {t("airdrop")}
-            </button>
-            <button onClick={() => void handleDisconnectCurrentMode()} disabled={signerMode === "none"}>
-              {t("disconnectWallet")}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {walletPublicKey && (
-        <div className="meta-compact" style={{ marginBottom: 8, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-          {t("viewingHint")}: <strong>{balance?.name ?? "—"}</strong>
-        </div>
-      )}
-
-      <div className="module-tabs">
-        <button
-          type="button"
-          className={activeModule === "savings" ? "primary" : ""}
-          onClick={() => setActiveModule("savings")}
-        >
-          {t("moduleSavings")}
-        </button>
-        <button
-          type="button"
-          className={activeModule === "yield" ? "primary" : ""}
-          onClick={() => setActiveModule("yield")}
-        >
-          {t("moduleYield")}
-        </button>
-      </div>
-
-      {activeModule === "savings" ? (
-        <div className="module-grid module-grid--savings">
-          <div className="card">
-            <h2>{t("accountAndBalance")}</h2>
-            <div className="row">
-              <button
-                className="primary"
-                onClick={() => setShowCreateModal(true)}
-                disabled={!canUseApp}
-              >
-                {t("createAccount")}
-              </button>
-            </div>
-
-            <div className="balance">
-              <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
-                {t("selectedAccountLabel")} · <strong>{balance?.name ?? "—"}</strong>
-              </div>
-              <div className="balanceLine" style={{ marginTop: 8 }}>
-                <span className="balance-hero">{balance ? balanceSolStr : "0.0"}</span>
-                <span className="muted">SOL</span>
-              </div>
-              <div className="balanceLine">
-                <span className="muted">
-                  {t("balanceLamports")}: {balance ? lamportsToSolStr(BigInt(balance.balance.toString())) : "0.0"}
+                  {walletSolFetchError ? (
+                    <p className="wallet-sol-fetch-error">{t("walletSolFetchError", { message: walletSolFetchError })}</p>
+                  ) : null}
+                  {addressMismatch && usingLocalSigner ? (
+                    <p className="wallet-address-mismatch">
+                      {t("addressMismatchHint", {
+                        phantom: publicKey?.toBase58() ?? "",
+                        local: localKeypair?.publicKey.toBase58() ?? ""
+                      })}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <span className="header-hint">
+                  {signerMode === "local" && !localKeypair
+                    ? t("localKeypairMissing")
+                    : signerMode === "browser"
+                      ? t("walletDisconnected")
+                      : t("notConfigured")}
                 </span>
-              </div>
+              )}
             </div>
           </div>
+        </header>
 
-          <div className="card">
-            <h2>{t("accountList")}</h2>
-            {accountsList.length === 0 ? (
-              <div className="muted">{t("emptyList")}</div>
-            ) : (
-              <div className="accountList">
-                {accountsList.map((acct) => (
-                  <div
-                    key={acct.pubkey}
-                    className={`accountItem ${acct.accountId === selectedAccountId ? "selected" : ""}`}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => setSelectedAccountId(acct.accountId)}
-                  >
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{acct.name}</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: "0.8rem" }}>
-                      <span className="muted">{t("onChainAddress")}</span>
-                      <span className="mono">{truncateAddress(acct.pubkey)}</span>
-                      <button
-                        className="copy-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copyToClipboard(acct.pubkey);
-                        }}
-                        title={t("copyAddressTitle")}
-                      >
-                        <CopyIcon />
-                      </button>
+        {walletPublicKey && (
+          <div className="meta-compact" style={{ marginBottom: 8, color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+            {t("viewingHint")}: <strong>{balance?.name ?? "—"}</strong>
+          </div>
+        )}
+
+        <div className="app-shell">
+          <aside className="sidebar card">
+            <div className="sidebar-title">Project</div>
+            <nav className="sidebar-nav" aria-label="Main Navigation">
+              <button
+                type="button"
+                className={`sidebar-item ${activeModule === "savings" ? "is-active" : ""}`}
+                onClick={() => setActiveModule("savings")}
+              >
+                <span className="sidebar-item-icon">◉</span>
+                <span>{t("moduleSavings")}</span>
+              </button>
+              <button
+                type="button"
+                className={`sidebar-item ${activeModule === "yield" ? "is-active" : ""}`}
+                onClick={() => setActiveModule("yield")}
+              >
+                <span className="sidebar-item-icon">◉</span>
+                <span>{t("moduleYield")}</span>
+              </button>
+              <button
+                type="button"
+                className={`sidebar-item ${activeModule === "lending" ? "is-active" : ""}`}
+                onClick={() => setActiveModule("lending")}
+              >
+                <span className="sidebar-item-icon">◉</span>
+                <span>{t("borrowSectionTitle")}</span>
+              </button>
+            </nav>
+          </aside>
+
+          <section className="content-pane">
+            {activeModule === "savings" ? (
+              <div className="module-grid module-grid--savings">
+                <div className="card">
+                  <h2>{t("accountAndBalance")}</h2>
+                  <div className="row">
+                    <button
+                      className="primary"
+                      onClick={() => setShowCreateModal(true)}
+                      disabled={!canUseApp}
+                    >
+                      {t("createAccount")}
+                    </button>
+                  </div>
+
+                  <div className="balance">
+                    <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                      {t("selectedAccountLabel")} · <strong>{balance?.name ?? "—"}</strong>
                     </div>
-                    <div className="muted" style={{ marginBottom: 6 }}>
-                      {t("balanceLamports")}: {lamportsStrToSolStr(acct.balance)}
+                    <div className="balanceLine" style={{ marginTop: 8 }}>
+                      <span className="balance-hero">{balance ? balanceSolStr : "0.0"}</span>
+                      <span className="muted">SOL</span>
                     </div>
-                    <div className="field">
-                      <label>{t("amountSol")}</label>
-                      <input
-                        value={amountByAccountId[acct.accountId] ?? "0.1"}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setAmountByAccountId((prev) => ({ ...prev, [acct.accountId]: value }));
-                        }}
-                        placeholder="0.1"
-                      />
-                    </div>
-                    <div className="row">
-                      <button
-                        className="primary"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
-                        }}
-                        disabled={!canUseApp}
-                      >
-                        {t("deposit")}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
-                        }}
-                        disabled={!canUseApp}
-                      >
-                        {t("withdraw")}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteAccount(acct.accountId);
-                        }}
-                        disabled={!canUseApp || isDeletingAccount}
-                      >
-                        {t("closeAccount")}
-                      </button>
+                    <div className="balanceLine">
+                      <span className="muted">
+                        {t("balanceLamports")}: {balance ? lamportsToSolStr(BigInt(balance.balance.toString())) : "0.0"}
+                      </span>
                     </div>
                   </div>
-                ))}
+                </div>
+
+                <div className="card">
+                  <h2>{t("accountList")}</h2>
+                  {accountsList.length === 0 ? (
+                    <div className="muted">{t("emptyList")}</div>
+                  ) : (
+                    <div className="accountList">
+                      {accountsList.map((acct) => (
+                        <div
+                          key={acct.pubkey}
+                          className={`accountItem ${acct.accountId === selectedAccountId ? "selected" : ""}`}
+                          style={{ cursor: "pointer" }}
+                          onClick={() => setSelectedAccountId(acct.accountId)}
+                        >
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>{acct.name}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: "0.8rem" }}>
+                            <span className="muted">{t("onChainAddress")}</span>
+                            <span className="mono">{truncateAddress(acct.pubkey)}</span>
+                            <button
+                              className="copy-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyToClipboard(acct.pubkey);
+                              }}
+                              title={t("copyAddressTitle")}
+                            >
+                              <CopyIcon />
+                            </button>
+                          </div>
+                          <div className="muted" style={{ marginBottom: 6 }}>
+                            {t("balanceLamports")}: {lamportsStrToSolStr(acct.balance)}
+                          </div>
+                          <div className="field">
+                            <label>{t("amountSol")}</label>
+                            <input
+                              value={amountByAccountId[acct.accountId] ?? "0.1"}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setAmountByAccountId((prev) => ({ ...prev, [acct.accountId]: value }));
+                              }}
+                              placeholder="0.1"
+                            />
+                          </div>
+                          <div className="row">
+                            <button
+                              className="primary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
+                              }}
+                              disabled={!canUseApp}
+                            >
+                              {t("deposit")}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
+                              }}
+                              disabled={!canUseApp}
+                            >
+                              {t("withdraw")}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteAccount(acct.accountId);
+                              }}
+                              disabled={!canUseApp || isDeletingAccount}
+                            >
+                              {t("closeAccount")}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+            ) : null}
+
+            {activeModule === "yield" ? <div className="card" data-yield-tick={yieldUiTick}>
+              <div className="yield-header">
+                <div>
+                  <h2>{t("yieldTitle")}</h2>
+                  <p className="muted">{t("yieldApyHint", { apy: (currentSupplyRateBps / 100).toFixed(2) })}</p>
+                </div>
+                <div className="yield-vault-addr">
+                  <span className="muted">{t("yieldVaultAddress")}</span>
+                  <div className="row">
+                    <span className="mono">{truncateAddress(getYieldVaultPda().toBase58(), 8)}</span>
+                    <button
+                      className="copy-btn"
+                      type="button"
+                      onClick={() => copyToClipboard(getYieldVaultPda().toBase58())}
+                      title={t("copyAddressTitle")}
+                    >
+                      <CopyIcon />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <p className="muted yield-hint-line">{t("yieldVaultHint")}</p>
+
+              <div className="overview-line">
+                <span>Total: {lamportsToSolStr(yieldVaultSummary?.totalAssetsLamports ?? 0n)} SOL</span>
+                <span>APY: {(currentSupplyRateBps / 100).toFixed(2)}%</span>
+                <span>Util: {(currentUtilBps / 100).toFixed(2)}%</span>
+              </div>
+              {yieldVaultSummary ? (
+                <div className="yield-metrics-grid">
+                  <div className="yield-metric"><span>Supply APY</span><b>{(currentSupplyRateBps / 100).toFixed(2)}%</b></div>
+                  <div className="yield-metric"><span>Borrow APY</span><b>{(currentBorrowRateBps / 100).toFixed(2)}%</b></div>
+                  <div className="yield-metric"><span>Utilization</span><b>{(currentUtilBps / 100).toFixed(2)}%</b></div>
+                  <div className="yield-metric"><span>Total Assets</span><b>{lamportsToSolStr(yieldVaultSummary.totalAssetsLamports)} SOL</b></div>
+                  <div className="yield-metric"><span>Total Borrowed</span><b>{lamportsToSolStr(yieldVaultSummary.totalBorrowedLamports)} SOL</b></div>
+                  <div className="yield-metric"><span>{t("yieldRewardPool")}</span><b>{lamportsToSolStr(yieldVaultSummary.rewardPoolLamports)} SOL</b></div>
+                  <div className="yield-metric"><span>Total Shares</span><b>{yieldVaultSummary.totalShares.toString()}</b></div>
+                  <div className="yield-metric"><span>Cash In Vault</span><b>{lamportsToSolStr(yieldVaultSummary.cashLamports)} SOL</b></div>
+                </div>
+              ) : null}
+
+              <div className="yield-position-strip compact">
+                {userYieldPosition ? (
+                  <>
+                    <div><span className="muted">Shares</span><b>{userYieldPosition.shares.toString()}</b></div>
+                    <div><span className="muted">Est. Assets</span><b>{lamportsToSolStr(
+                      assetsFromShares(
+                        userYieldPosition.shares,
+                        yieldVaultSummary?.totalAssetsLamports ?? 0n,
+                        yieldVaultSummary?.totalShares ?? 0n
+                      )
+                    )} SOL</b></div>
+                  </>
+                ) : (
+                  <span className="muted">{t("yieldNoPosition")}</span>
+                )}
+              </div>
+
+              <div className="yield-core card-lite">
+                <div className="row action-row">
+                  <button className="primary" type="button" onClick={() => openYieldModal("deposit")} disabled={!canUseApp || accountsList.length === 0}>
+                    {t("yieldDepositBtn")}
+                  </button>
+                  <button type="button" onClick={() => openYieldModal("withdraw")} disabled={!canUseApp || accountsList.length === 0}>
+                    {t("yieldWithdrawBtn")}
+                  </button>
+                </div>
+              </div>
+            </div> : null}
+
+            {activeModule === "lending" ? <div className="card">
+              <div className="yield-header">
+                <div>
+                  <h2>{t("borrowSectionTitle")}</h2>
+                  <p className="muted">Borrow APY {(currentBorrowRateBps / 100).toFixed(2)}% · Util {(currentUtilBps / 100).toFixed(2)}%</p>
+                </div>
+              </div>
+
+              <div className="overview-line">
+                <span>Total Borrowed: {lamportsToSolStr(yieldVaultSummary?.totalBorrowedLamports ?? 0n)} SOL</span>
+                <span>Cash: {lamportsToSolStr(yieldVaultSummary?.cashLamports ?? 0n)} SOL</span>
+              </div>
+
+              <div className="yield-core card-lite">
+                <div className="field">
+                  <label>{t("lendingAccount")}</label>
+                  <select value={lendingAccountId} onChange={(e) => setLendingAccountId(e.target.value)} disabled={!canUseApp || accountsList.length === 0}>
+                    {accountsList.map((a) => <option key={a.accountId} value={a.accountId}>{a.name}</option>)}
+                  </select>
+                </div>
+                <div className="input-row">
+                  <input value={lendingAmount} onChange={(e) => setLendingAmount(e.target.value)} placeholder="0.1" />
+                  <button type="button" className="max-btn" onClick={fillMaxForLending} disabled={!canUseApp}>MAX</button>
+                </div>
+                <div className="row action-row">
+                  <button type="button" onClick={() => void handleBorrow(lendingAccountId, lendingAmount)} disabled={!canBorrowNow}>
+                    {t("borrowBtn")}
+                  </button>
+                  <button type="button" onClick={() => void handleRepay(lendingAccountId, lendingAmount)} disabled={!canRepayNow}>
+                    {t("repayBtn")}
+                  </button>
+                </div>
+              </div>
+            </div> : null}
+          </section>
         </div>
-      ) : null}
-
-      {activeModule === "yield" ? <div className="card" data-yield-tick={yieldUiTick}>
-        <div className="yield-header">
-          <div>
-            <h2>{t("yieldTitle")}</h2>
-            <p className="muted">{t("yieldApyHint", { apy: (currentSupplyRateBps / 100).toFixed(2) })}</p>
-          </div>
-          <div className="yield-vault-addr">
-            <span className="muted">{t("yieldVaultAddress")}</span>
-            <div className="row">
-              <span className="mono">{truncateAddress(getYieldVaultPda().toBase58(), 8)}</span>
-              <button
-                className="copy-btn"
-                type="button"
-                onClick={() => copyToClipboard(getYieldVaultPda().toBase58())}
-                title={t("copyAddressTitle")}
-              >
-                <CopyIcon />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <p className="muted" style={{ marginBottom: 14 }}>{t("yieldVaultHint")}</p>
-
-        <div className="overview-line">
-          <span>Total: {lamportsToSolStr(yieldVaultSummary?.totalAssetsLamports ?? 0n)} SOL</span>
-          <span>APY: {(currentSupplyRateBps / 100).toFixed(2)}%</span>
-          <span>Util: {(currentUtilBps / 100).toFixed(2)}%</span>
-        </div>
-
-        <div className="yield-position-strip compact">
-          {userYieldPosition ? (
-            <>
-              <div><span className="muted">Shares</span><b>{userYieldPosition.shares.toString()}</b></div>
-              <div><span className="muted">Est. Assets</span><b>{lamportsToSolStr(
-                assetsFromShares(
-                  userYieldPosition.shares,
-                  yieldVaultSummary?.totalAssetsLamports ?? 0n,
-                  yieldVaultSummary?.totalShares ?? 0n
-                )
-              )} SOL</b></div>
-            </>
-          ) : (
-            <span className="muted">{t("yieldNoPosition")}</span>
-          )}
-        </div>
-
-        <div className="yield-core card-lite">
-          <div className="yield-tabs">
-            <button type="button" className={yieldActionTab === "deposit" ? "primary" : ""} onClick={() => setYieldActionTab("deposit")}>{t("deposit")}</button>
-            <button type="button" className={yieldActionTab === "withdraw" ? "primary" : ""} onClick={() => setYieldActionTab("withdraw")}>{t("withdraw")}</button>
-            <button type="button" className={yieldActionTab === "lending" ? "primary" : ""} onClick={() => setYieldActionTab("lending")}>{t("borrowSectionTitle")}</button>
-          </div>
-
-          {yieldActionTab === "deposit" || yieldActionTab === "withdraw" ? (
-            <>
-              <div className="field">
-                <label>{t("yieldTransferAccount")}</label>
-                <select value={yieldAccountId} onChange={(e) => setYieldAccountId(e.target.value)} disabled={!canUseApp || accountsList.length === 0}>
-                  {accountsList.map((a) => <option key={a.accountId} value={a.accountId}>#{a.accountId} · {a.name}</option>)}
-                </select>
-              </div>
-              <div className="input-row">
-                <input value={yieldAmount} onChange={(e) => setYieldAmount(e.target.value)} placeholder="0.1" />
-                <button type="button" className="max-btn" onClick={fillMaxForCurrentTab} disabled={!canUseApp}>MAX</button>
-              </div>
-              {yieldActionTab === "deposit" ? (
-                <button className="primary full" type="button" onClick={() => void handleYieldDeposit(yieldAccountId, yieldAmount)} disabled={!canDepositYield}>
-                  {t("yieldDepositBtn")}
-                </button>
-              ) : (
-                <button className="full" type="button" onClick={() => void handleYieldWithdraw(yieldAccountId, yieldAmount)} disabled={!canWithdrawYield}>
-                  {t("yieldWithdrawBtn")}
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="field">
-                <label>{t("lendingAccount")}</label>
-                <select value={lendingAccountId} onChange={(e) => setLendingAccountId(e.target.value)} disabled={!canUseApp || accountsList.length === 0}>
-                  {accountsList.map((a) => <option key={a.accountId} value={a.accountId}>#{a.accountId} · {a.name}</option>)}
-                </select>
-              </div>
-              <div className="input-row">
-                <input value={lendingAmount} onChange={(e) => setLendingAmount(e.target.value)} placeholder="0.1" />
-                <button type="button" className="max-btn" onClick={fillMaxForCurrentTab} disabled={!canUseApp}>MAX</button>
-              </div>
-              <div className="row action-row">
-                <button type="button" onClick={() => void handleBorrow(lendingAccountId, lendingAmount)} disabled={!canBorrowNow}>
-                  {t("borrowBtn")}
-                </button>
-                <button type="button" onClick={() => void handleRepay(lendingAccountId, lendingAmount)} disabled={!canRepayNow}>
-                  {t("repayBtn")}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        <button type="button" className="text-link danger" onClick={() => void handleDeleteAccount(yieldAccountId)} disabled={!canUseApp || isDeletingAccount}>
-          {t("closeAccount")}
-        </button>
-
-        <button type="button" className="text-link" onClick={() => setShowAdvancedYield((v) => !v)}>
-          {showAdvancedYield ? "收起高级数据 ▲" : "展开高级数据 ▼"}
-        </button>
-
-        {showAdvancedYield && yieldVaultSummary ? (
-          <div className="yield-metrics-grid">
-            <div className="yield-metric"><span>Supply APY</span><b>{(currentSupplyRateBps / 100).toFixed(2)}%</b></div>
-            <div className="yield-metric"><span>Borrow APY</span><b>{(currentBorrowRateBps / 100).toFixed(2)}%</b></div>
-            <div className="yield-metric"><span>Utilization</span><b>{(currentUtilBps / 100).toFixed(2)}%</b></div>
-            <div className="yield-metric"><span>Total Assets</span><b>{lamportsToSolStr(yieldVaultSummary.totalAssetsLamports)} SOL</b></div>
-            <div className="yield-metric"><span>Total Borrowed</span><b>{lamportsToSolStr(yieldVaultSummary.totalBorrowedLamports)} SOL</b></div>
-            <div className="yield-metric"><span>{t("yieldRewardPool")}</span><b>{lamportsToSolStr(yieldVaultSummary.rewardPoolLamports)} SOL</b></div>
-            <div className="yield-metric"><span>Total Shares</span><b>{yieldVaultSummary.totalShares.toString()}</b></div>
-            <div className="yield-metric"><span>Cash In Vault</span><b>{lamportsToSolStr(yieldVaultSummary.cashLamports)} SOL</b></div>
-          </div>
-        ) : null}
-      </div> : null}
+      </div>
 
       <div className={`status ${statusLine.tone === "error" ? "status--error" : ""}`}>
         <div className="status-line">
@@ -1471,6 +1484,41 @@ export default function App() {
                 {isCreatingAccount ? t("creating") : t("confirmCreate")}
               </button>
               <button onClick={() => setShowCreateModal(false)}>{t("cancel")}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {yieldModalAction ? (
+        <div className="modalMask" onClick={() => setYieldModalAction(null)}>
+          <div className="modalCard" onClick={(e) => e.stopPropagation()}>
+            <h3>{yieldModalAction === "deposit" ? t("yieldDepositBtn") : t("yieldWithdrawBtn")}</h3>
+            <div className="field">
+              <label>{t("yieldTransferAccount")}</label>
+              <select value={yieldAccountId} onChange={(e) => setYieldAccountId(e.target.value)} disabled={!canUseApp || accountsList.length === 0}>
+                {accountsList.map((a) => <option key={a.accountId} value={a.accountId}>{a.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>{t("amountSol")}</label>
+              <div className="input-row">
+                <input value={yieldAmount} onChange={(e) => setYieldAmount(e.target.value)} placeholder="0.1" />
+                <button type="button" className="max-btn" onClick={fillMaxForYieldTab} disabled={!canUseApp}>MAX</button>
+              </div>
+            </div>
+            <div className="row">
+              {yieldModalAction === "deposit" ? (
+                <button className="primary" type="button" onClick={() => { void handleYieldDeposit(yieldAccountId, yieldAmount); setYieldModalAction(null); }} disabled={!canDepositYield}>
+                  {t("yieldDepositBtn")}
+                </button>
+              ) : (
+                <button type="button" onClick={() => { void handleYieldWithdraw(yieldAccountId, yieldAmount); setYieldModalAction(null); }} disabled={!canWithdrawYield}>
+                  {t("yieldWithdrawBtn")}
+                </button>
+              )}
+              <button type="button" onClick={() => setYieldModalAction(null)}>
+                {t("cancel")}
+              </button>
             </div>
           </div>
         </div>

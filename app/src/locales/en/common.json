@@ -41,7 +41,7 @@
   "deleteNonZero": "Close failed: account balance is not zero. Withdraw to zero first",
   "txFailed": "Transaction failed. Check params and try again",
   "langLabel": "Language",
-  "langZh": "中文",
+  "langZh": "简体中文",
   "langEn": "English",
   "loadingDots": "...",
   "airdropConfirmed": "Airdrop confirmed",
@@ -76,7 +76,7 @@
   "yieldFundAmount": "Fund reward pool (SOL)",
   "yieldFundBtn": "Fund vault",
   "statusFundingYield": "Funding reward pool…",
-  "borrowSectionTitle": "Borrow/Repay",
+  "borrowSectionTitle": "Lending",
   "borrowToAccount": "Borrow to savings account",
   "repayFromAccount": "Repay from savings account",
   "lendingAccount": "Lending account",
@@ -86,5 +86,5 @@
   "yieldTransferAccount": "Account",
   "moduleOverview": "Overview",
   "moduleSavings": "Savings",
-  "moduleYield": "Yield & Lending"
+  "moduleYield": "Yield"
 }
