@@ -32,10 +32,11 @@ body {
 }
 
 .container {
-  max-width: 1000px;
+  max-width: 1152px;
   margin: 0 auto;
-  padding: 24px 20px 48px;
+  padding: 12px 12px 18px;
   position: relative;
+  font-size: 0.875rem;
 }
 
 /* Header */
@@ -44,8 +45,9 @@ body {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 20px;
-  padding: 16px 0 24px;
+  gap: 12px;
+  padding: 6px 0 10px;
+  min-height: 56px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
@@ -62,7 +64,7 @@ body {
 .header-actions {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
   flex: 1 1 560px;
   flex-wrap: wrap;
@@ -77,10 +79,10 @@ body {
 }
 
 .lang-corner {
-  position: absolute;
-  top: 8px;
-  right: 20px;
-  z-index: 10;
+  position: static;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 
 .lang-select {
@@ -94,7 +96,7 @@ body {
 
 .wallet-info {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
   flex: 1 1 340px;
@@ -363,13 +365,13 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 18px;
+  padding: 9px 14px;
   border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 10px;
+  border-radius: 8px;
   background: linear-gradient(180deg, rgba(99, 102, 241, 0.25) 0%, rgba(99, 102, 241, 0.1) 100%);
   color: var(--text-primary);
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
@@ -404,19 +406,19 @@ button.primary:hover:not(:disabled) {
 
 /* Cards - Glassmorphism */
 .card {
-  margin-top: 20px;
-  padding: 24px;
+  margin-top: 12px;
+  padding: 12px;
   background: var(--bg-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--bg-card-border);
-  border-radius: 16px;
+  border-radius: 10px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
 }
 
 .card h2 {
-  margin: 0 0 18px;
-  font-size: 1.1rem;
+  margin: 0 0 10px;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.01em;
@@ -424,8 +426,8 @@ button.primary:hover:not(:disabled) {
 
 /* Balance section */
 .balance {
-  margin-top: 20px;
-  padding: 20px;
+  margin-top: 10px;
+  padding: 12px;
   background: rgba(0, 0, 0, 0.25);
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.08);
@@ -435,11 +437,11 @@ button.primary:hover:not(:disabled) {
   display: flex;
   gap: 10px;
   align-items: baseline;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .balance-hero {
-  font-size: 1.75rem;
+  font-size: 1.35rem;
   font-weight: 700;
   font-family: "JetBrains Mono", monospace;
   background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-green) 100%);
@@ -460,14 +462,14 @@ button.primary:hover:not(:disabled) {
 
 /* Account list */
 .accountList {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  margin-top: 4px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
 }
 
 .accountItem {
-  padding: 18px;
+  padding: 8px;
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid rgba(148, 163, 184, 0.1);
   border-radius: 12px;
@@ -486,16 +488,37 @@ button.primary:hover:not(:disabled) {
 }
 
 .accountItem .mono {
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   color: var(--text-secondary);
+}
+
+.accountItem .field label {
+  font-size: 0.75rem;
+}
+
+.accountItem .field input {
+  padding: 7px 9px;
+}
+
+.accountItem .row {
+  gap: 6px;
+  align-items: stretch;
+}
+
+.accountItem .row button {
+  min-width: 0;
+  flex: 1 1 0;
+  padding: 6px 8px;
+  font-size: 0.74rem;
+  min-height: 30px;
 }
 
 /* Form fields */
 .field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 label {
@@ -504,13 +527,13 @@ label {
 }
 
 input {
-  padding: 12px 14px;
+  padding: 8px 10px;
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--text-primary);
   font-family: "JetBrains Mono", monospace;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   min-width: 0;
   width: 100%;
   transition: border-color 0.2s;
@@ -523,6 +546,130 @@ input:focus {
 
 input::placeholder {
   color: var(--text-muted);
+}
+
+select {
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  width: 100%;
+}
+
+.yield-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+
+.yield-header h2 {
+  margin-bottom: 6px;
+}
+
+.yield-vault-addr {
+  text-align: right;
+}
+
+.yield-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.yield-metric {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.yield-metric span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.yield-metric b {
+  font-size: 0.84rem;
+}
+
+.yield-position-strip {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 10px;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.yield-position-strip.compact {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  gap: 14px;
+}
+
+.yield-position-strip > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.yield-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.yield-action-card {
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+  padding: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 212px;
+}
+
+.yield-action-card h3 {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.yield-action-card button {
+  margin-top: 2px;
+  padding: 8px 10px;
+  min-height: 36px;
+}
+
+.yield-action-card .field {
+  margin-top: 6px;
+}
+
+.yield-action-card .field input,
+.yield-action-card .field select {
+  min-height: 36px;
+}
+
+.action-row {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.action-row > button {
+  width: 100%;
+  justify-content: center;
 }
 
 /* Status bar: fixed single-line height to reduce layout jump / flicker on text changes. */
@@ -605,7 +752,108 @@ input::placeholder {
   color: var(--text-secondary);
 }
 
+.module-tabs {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.module-tabs button {
+  min-width: 92px;
+  padding: 7px 10px;
+  font-size: 0.82rem;
+}
+
+.overview-line {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  margin: 6px 0;
+}
+
+.card-lite {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.yield-core {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yield-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.yield-tabs button {
+  width: 100%;
+  justify-content: center;
+}
+
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-row input {
+  flex: 1;
+}
+
+.max-btn {
+  width: 64px;
+  justify-content: center;
+}
+
+button.full {
+  width: 100%;
+  justify-content: center;
+}
+
+.text-link {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 0;
+  margin-top: 6px;
+  width: fit-content;
+}
+
+.text-link:hover:not(:disabled) {
+  color: var(--text-primary);
+  box-shadow: none;
+  text-decoration: underline;
+  background: transparent;
+  border: none;
+}
+
+.text-link.danger {
+  color: #f87171;
+}
+
+.module-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.module-grid--savings {
+  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.15fr);
+}
+
 @media (max-width: 900px) {
+  .module-grid--savings {
+    grid-template-columns: 1fr;
+  }
+
   .app-header {
     align-items: flex-start;
   }
@@ -621,7 +869,7 @@ input::placeholder {
 
 @media (max-width: 640px) {
   .container {
-    padding: 16px 12px 32px;
+    padding: 12px 10px 24px;
   }
 
   .lang-corner {
@@ -630,7 +878,7 @@ input::placeholder {
   }
 
   .card {
-    padding: 16px;
+    padding: 12px;
   }
 
   .balance-hero {

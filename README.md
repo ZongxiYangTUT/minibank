@@ -40,43 +40,41 @@ The deployed program id must match `declare_id!` in `programs/minibank/src/lib.r
 - `error.rs` — `#[error_code]`
 - `constants.rs` — seeds and limits
 
-### Yield feature (余额宝-style)
+### Yield feature (share-based vault)
 
-The program now includes two additional instructions:
+Stage-1 protocol now uses a **share model** (instead of per-user accrued interest fields):
 
-- `yield_deposit(account_id, amount)`:
-  - moves lamports from the selected `MiniAccount` PDA to global `YieldVault` PDA
-  - decreases `mini_account.balance`
-  - increases user principal in `UserYieldPosition`
-- `yield_withdraw(target_account_id)`:
-  - accrues interest up to `Clock::unix_timestamp`
-  - withdraws the full position back to the selected savings account
-  - principal is guaranteed first; yield paid is capped by vault reward liquidity
+- `yield_deposit(account_id, amount)` mints user shares using:
+  - `minted_shares = amount * total_shares / total_assets` (or `amount` when pool is empty)
+- `yield_withdraw(target_account_id, amount)` burns shares based on requested assets
+- User account stores `shares` only; value is derived by:
+  - `user_assets = user_shares * total_assets / total_shares`
 
-### Floating APY model
+`YieldVault` tracks:
 
-This project uses a **floating APY** instead of a fixed APY.
+- `total_assets` (pool assets)
+- `total_shares`
+- `total_borrowed`
+- `last_accrual_ts`
 
-- Units are in **bps** (basis points):
-  - `1 bps = 0.01%`
-  - `100 bps = 1%`
-  - `10_000 bps = 100%`
-- Dynamic APY formula:
-  - `APY = clamp(MIN_APY + reward_pool_ratio_bps / APY_RATIO_DIVISOR, MIN_APY, MAX_APY)`
-  - `reward_pool_ratio_bps = reward_pool / total_principal * 10_000`
-- Current on-chain constants (see `programs/minibank/src/constants.rs`):
-  - `MIN_YIELD_APY_BPS = 100` (1.00%)
-  - `MAX_YIELD_APY_BPS = 2000` (20.00%)
-  - `APY_RATIO_DIVISOR = 2` (reduces sensitivity; APY reacts more smoothly to pool changes)
+This means share count stays constant while per-share value can grow.
 
-In plain language: when reward pool grows relative to total principal, APY rises; when reward pool shrinks, APY moves back toward the minimum.
+### Borrow/repay + utilization rate model
 
-Important accounting rule:
+The pool includes borrow-side accounting:
 
-- `YieldVault.total_principal_lamports` tracks the sum of all users' principal.
-- Reward pool is computed as:
-  - `reward_pool = vault_lamports - rent_exempt - total_principal_lamports`
-- This avoids paying one user's yield using another user's principal.
+- `borrow(target_account_id, amount)`
+- `repay(source_account_id, amount)`
+
+Interest is accrued globally before state-changing ops (`deposit/withdraw/borrow/repay`):
+
+- `utilization = total_borrowed / total_assets`
+- piecewise borrow rate (`base + slope1/slope2` with kink)
+- accrued interest increases both:
+  - `total_borrowed` (liability side)
+  - `total_assets` (supplier side yield source)
+
+This implements automatic compounding at pool level.
 
 ### Funding the reward pool
 
@@ -90,12 +88,10 @@ If reward pool is zero, users will still be able to redeem principal, but paid y
 ### Quick test flow (recommended)
 
 1. Deposit some SOL from a savings account into yield (`yield_deposit`).
-2. Fund vault with extra SOL using **Fund vault / 注资收益池**.
-3. Wait 10s+ and refresh UI to see updated estimated APY/yield.
-4. Withdraw (`yield_withdraw`) back to a target savings account.
-5. Compare:
-   - principal always returns first
-   - paid yield is limited by current reward pool liquidity
+2. Deposit from another user and verify share ratio.
+3. Borrow from the vault, wait a few seconds, then repay.
+4. Observe `total_assets/total_shares` and user-estimated assets.
+5. Withdraw (`yield_withdraw`) and verify burn-shares behavior.
 
 ## Frontend (`app/`)
 

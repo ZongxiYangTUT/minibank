@@ -1,12 +1,16 @@
 use anchor_lang::prelude::*;
 
-/// Global vault PDA that holds all 余额宝 principal plus reward pool lamports.
-///
-/// `total_principal_lamports` must equal the sum of all [`UserYieldPosition::principal_lamports`].
-/// Reward liquidity = `vault.lamports() - rent_exempt - total_principal_lamports` (funded by transfers in).
+/// Global pool state for share-based yield + borrow market.
 #[account]
 #[derive(InitSpace)]
 pub struct YieldVault {
     pub bump: u8,
-    pub total_principal_lamports: u64,
+    /// Total underlying assets owned by depositors (vault cash + outstanding borrows).
+    pub total_assets: u64,
+    /// Total shares minted to depositors.
+    pub total_shares: u64,
+    /// Outstanding borrowed principal + accrued borrow interest.
+    pub total_borrowed: u64,
+    /// Last timestamp when global borrow interest was accrued.
+    pub last_accrual_ts: i64,
 }

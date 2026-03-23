@@ -43,7 +43,15 @@ pub mod minibank {
         instructions::yield_deposit::process(ctx, account_id, amount)
     }
 
-    pub fn yield_withdraw(ctx: Context<YieldWithdraw>, target_account_id: u64) -> Result<()> {
-        instructions::yield_withdraw::process(ctx, target_account_id)
+    pub fn yield_withdraw(ctx: Context<YieldWithdraw>, target_account_id: u64, amount: u64) -> Result<()> {
+        instructions::yield_withdraw::process(ctx, target_account_id, amount)
+    }
+
+    pub fn borrow(ctx: Context<Borrow>, target_account_id: u64, amount: u64) -> Result<()> {
+        instructions::borrow::process(ctx, target_account_id, amount)
+    }
+
+    pub fn repay(ctx: Context<Repay>, source_account_id: u64, amount: u64) -> Result<()> {
+        instructions::repay::process(ctx, source_account_id, amount)
     }
 }

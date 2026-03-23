@@ -11,13 +11,13 @@ import { SolanaNetwork, useSolanaNetwork } from "./SolanaWalletProvider";
 const programId = new PublicKey("9Sa5rGRUsm8SikPFcDYSCEAHLch1xdqSvK6A8xbhb6nr");
 const accountSeed = "mini_account";
 const userStatsSeed = "user_stats";
-const yieldVaultSeed = "yield_vault";
+const yieldVaultSeed = "yield_vault_v2";
 const userYieldSeed = "user_yield";
-/** Must match on-chain floating APY constants in `constants.rs`. */
-const MIN_YIELD_APY_BPS = 100;
-const MAX_YIELD_APY_BPS = 2000;
-const APY_RATIO_DIVISOR = 2;
-const SECONDS_PER_YEAR = 31_536_000;
+/** Must match on-chain piecewise rate constants in `constants.rs`. */
+const RATE_BASE_BPS = 100;
+const RATE_SLOPE1_BPS = 400;
+const RATE_SLOPE2_BPS = 2000;
+const RATE_KINK_UTIL_BPS = 8000;
 
 type MiniAccountData = {
   name: string;
@@ -52,34 +52,29 @@ function lamportsStrToSolStr(lamportsStr: string): string {
   return lamportsToSolStr(BigInt(lamportsStr || "0"));
 }
 
-type UserYieldPositionData = {
-  principalLamports: bigint;
-  accruedYieldLamports: bigint;
-  lastYieldTs: number;
-};
+function utilizationBps(totalAssets: bigint, totalBorrowed: bigint): number {
+  if (totalAssets <= 0n) return 0;
+  const u = Number((totalBorrowed * 10_000n) / totalAssets);
+  return Math.max(0, Math.min(10_000, u));
+}
 
-/** Simple-interest pending accrual since `lastYieldTs` (matches on-chain `accrue_yield`). */
-function estimateYieldTotalLamports(
-  principal: bigint,
-  accrued: bigint,
-  lastYieldTs: number,
-  nowSec: number,
-  currentApyBps: number
-): bigint {
-  let pending = 0n;
-  if (lastYieldTs > 0 && principal > 0n) {
-    const elapsed = Math.max(0, Math.floor(nowSec - lastYieldTs));
-    pending = (principal * BigInt(currentApyBps) * BigInt(elapsed)) / (10000n * BigInt(SECONDS_PER_YEAR));
+function borrowRateBps(utilBps: number): number {
+  if (utilBps <= RATE_KINK_UTIL_BPS) {
+    return RATE_BASE_BPS + Math.floor((utilBps * RATE_SLOPE1_BPS) / RATE_KINK_UTIL_BPS);
   }
-  return principal + accrued + pending;
+  const tail = utilBps - RATE_KINK_UTIL_BPS;
+  const tailRange = 10_000 - RATE_KINK_UTIL_BPS;
+  return RATE_BASE_BPS + RATE_SLOPE1_BPS + Math.floor((tail * RATE_SLOPE2_BPS) / tailRange);
 }
 
-function dynamicApyBpsFromPool(rewardPoolLamports: bigint, totalPrincipalLamports: bigint): number {
-  if (totalPrincipalLamports <= 0n) return MIN_YIELD_APY_BPS;
-  const ratioBps = Number((rewardPoolLamports * 10_000n) / totalPrincipalLamports);
-  const dynamic = MIN_YIELD_APY_BPS + Math.floor(ratioBps / APY_RATIO_DIVISOR);
-  return Math.max(MIN_YIELD_APY_BPS, Math.min(MAX_YIELD_APY_BPS, dynamic));
+function assetsFromShares(shares: bigint, totalAssets: bigint, totalShares: bigint): bigint {
+  if (shares <= 0n || totalAssets <= 0n || totalShares <= 0n) return 0n;
+  return (shares * totalAssets) / totalShares;
 }
+
+type UserYieldPositionData = {
+  shares: bigint;
+};
 
 function getYieldVaultPda(): PublicKey {
   return PublicKey.findProgramAddressSync([new TextEncoder().encode(yieldVaultSeed)], programId)[0];
@@ -93,6 +88,8 @@ function getUserYieldPda(owner: PublicKey): PublicKey {
 }
 
 type SignerMode = "none" | "browser" | "local";
+type ModuleView = "savings" | "yield";
+type YieldActionTab = "deposit" | "withdraw" | "lending";
 
 export default function App() {
   const { t, i18n } = useTranslation();
@@ -133,7 +130,7 @@ export default function App() {
     };
   }, [localKeypair]);
 
-  const [signerMode, setSignerMode] = useState<SignerMode>("none");
+  const [signerMode, setSignerMode] = useState<SignerMode>("local");
 
   const browserReady = !!walletAdapterSigner;
   const localReady = !!localSigner;
@@ -200,17 +197,24 @@ export default function App() {
 
   const [selectedAccountId, setSelectedAccountId] = useState<string>("0");
 
-  const [yieldDepositAmount, setYieldDepositAmount] = useState<string>("0.1");
+  const [yieldAmount, setYieldAmount] = useState<string>("0.1");
   const [yieldFundAmount, setYieldFundAmount] = useState<string>("0.1");
-  const [yieldSourceAccountId, setYieldSourceAccountId] = useState<string>("0");
-  const [yieldDestAccountId, setYieldDestAccountId] = useState<string>("0");
+  const [lendingAmount, setLendingAmount] = useState<string>("0.1");
+  const [yieldAccountId, setYieldAccountId] = useState<string>("0");
+  const [lendingAccountId, setLendingAccountId] = useState<string>("0");
   const [userYieldPosition, setUserYieldPosition] = useState<UserYieldPositionData | null>(null);
   const [yieldVaultSummary, setYieldVaultSummary] = useState<{
-    totalPrincipalLamports: bigint;
+    totalAssetsLamports: bigint;
+    totalShares: bigint;
+    totalBorrowedLamports: bigint;
+    cashLamports: bigint;
     rewardPoolLamports: bigint;
   } | null>(null);
   /** Bumps every 10s so estimated yield re-renders without polling chain. */
   const [yieldUiTick, setYieldUiTick] = useState(0);
+  const [activeModule, setActiveModule] = useState<ModuleView>("savings");
+  const [yieldActionTab, setYieldActionTab] = useState<YieldActionTab>("deposit");
+  const [showAdvancedYield, setShowAdvancedYield] = useState(false);
 
   /** Close create modal only when mousedown and mouseup both target the backdrop (not drag-select from inputs). */
   const createModalBackdropMouseDownRef = useRef(false);
@@ -234,6 +238,16 @@ export default function App() {
     }
     if (raw.includes("NoYieldPosition") || raw.includes("No 余额宝")) {
       return i18n.language === "zh" ? "暂无余额宝持仓" : "No yield position";
+    }
+    if (raw.includes("InsufficientShares") || raw.includes("Insufficient shares")) {
+      return i18n.language === "zh"
+        ? "余额宝份额不足，请减少取出金额或先转入"
+        : "Insufficient vault shares. Reduce withdraw amount or deposit first";
+    }
+    if (raw.includes("InvalidShareAmount") || raw.includes("Invalid share amount")) {
+      return i18n.language === "zh"
+        ? "取出金额过小，无法换算有效份额"
+        : "Withdraw amount is too small to convert into valid shares";
     }
     if (raw.includes("YieldVaultInsufficient") || raw.includes("Yield vault does not have enough")) {
       return i18n.language === "zh" ? "收益池 SOL 不足，请先向 Vault 地址转入" : "Yield vault has insufficient SOL; fund the vault";
@@ -396,14 +410,22 @@ export default function App() {
         setYieldVaultSummary(null);
         return;
       }
-      const totalP = BigInt((v.totalPrincipalLamports ?? v.total_principal_lamports).toString());
+      const totalAssets = BigInt((v.totalAssets ?? v.total_assets ?? 0).toString());
+      const totalShares = BigInt((v.totalShares ?? v.total_shares ?? 0).toString());
+      const totalBorrowed = BigInt((v.totalBorrowed ?? v.total_borrowed ?? 0).toString());
       const info = await connection.getAccountInfo(vaultPk, "confirmed");
       const dataLen = info?.data.length ?? 17;
       const minRent = BigInt(await connection.getMinimumBalanceForRentExemption(dataLen, "confirmed"));
       const lamports = BigInt(await connection.getBalance(vaultPk, "confirmed"));
-      const available = lamports > minRent ? lamports - minRent : 0n;
-      const rewardPool = available > totalP ? available - totalP : 0n;
-      setYieldVaultSummary({ totalPrincipalLamports: totalP, rewardPoolLamports: rewardPool });
+      const cash = lamports > minRent ? lamports - minRent : 0n;
+      const rewardPool = totalAssets > totalBorrowed ? totalAssets - totalBorrowed : 0n;
+      setYieldVaultSummary({
+        totalAssetsLamports: totalAssets,
+        totalShares,
+        totalBorrowedLamports: totalBorrowed,
+        cashLamports: cash,
+        rewardPoolLamports: rewardPool
+      });
     } catch {
       setYieldVaultSummary(null);
     }
@@ -421,13 +443,8 @@ export default function App() {
         setUserYieldPosition(null);
         return;
       }
-      const pr = y.principalLamports ?? y.principal_lamports;
-      const ac = y.accruedYieldLamports ?? y.accrued_yield_lamports;
-      const ts = y.lastYieldTs ?? y.last_yield_ts;
       setUserYieldPosition({
-        principalLamports: BigInt(pr.toString()),
-        accruedYieldLamports: BigInt(ac.toString()),
-        lastYieldTs: Number(ts.toString())
+        shares: BigInt((y.shares ?? 0).toString())
       });
     } catch {
       setUserYieldPosition(null);
@@ -435,9 +452,18 @@ export default function App() {
   }
 
   useEffect(() => {
-    setYieldSourceAccountId(selectedAccountId);
-    setYieldDestAccountId(selectedAccountId);
+    setYieldAccountId(selectedAccountId);
+    setLendingAccountId(selectedAccountId);
   }, [selectedAccountId]);
+
+  useEffect(() => {
+    if (accountsList.length === 0) return;
+    const firstId = accountsList[0].accountId;
+    const hasYieldId = accountsList.some((a) => a.accountId === yieldAccountId);
+    if (!hasYieldId) setYieldAccountId(firstId);
+    const hasLendingId = accountsList.some((a) => a.accountId === lendingAccountId);
+    if (!hasLendingId) setLendingAccountId(firstId);
+  }, [accountsList, yieldAccountId, lendingAccountId]);
 
   useEffect(() => {
     if (!walletPublicKey || !program) return;
@@ -637,10 +663,16 @@ export default function App() {
     }
   }
 
-  async function handleYieldDeposit() {
+  async function handleYieldDeposit(accountIdStr: string, amountSol: string) {
     if (!program || !walletPublicKey) return;
-    const accountIdBn = parseU64ToBN(yieldSourceAccountId);
+    const accountIdBn = parseU64ToBN(accountIdStr);
     if (!accountIdBn) return;
+    const targetInList = accountsList.find((a) => a.accountId === accountIdStr);
+    if (!targetInList) {
+      if (accountsList.length > 0) setYieldAccountId(accountsList[0].accountId);
+      setAppStatus(t("accountNotFound"), "error");
+      return;
+    }
     const pdaForOp = PublicKey.findProgramAddressSync(
       [
         new TextEncoder().encode(accountSeed),
@@ -649,7 +681,7 @@ export default function App() {
       ],
       programId
     )[0];
-    const lamports = parseSolToLamports(yieldDepositAmount);
+    const lamports = parseSolToLamports(amountSol);
     if (lamports <= 0n) {
       setAppStatus(t("invalidAmount"), "error");
       return;
@@ -674,7 +706,7 @@ export default function App() {
       await fetchUserYield();
       await fetchYieldVaultSummary();
       await fetchAllSavingsAccounts();
-      await refreshBalance(yieldSourceAccountId);
+      await refreshBalance(accountIdStr);
       setAppStatus(t("balanceRefreshed"), "default");
     } catch (e: any) {
       setAppStatus(friendlyError(e), "error");
@@ -720,10 +752,21 @@ export default function App() {
     }
   }
 
-  async function handleYieldWithdraw() {
+  async function handleYieldWithdraw(accountIdStr: string, amountSol: string) {
     if (!program || !walletPublicKey) return;
-    const targetBn = parseU64ToBN(yieldDestAccountId);
+    const targetBn = parseU64ToBN(accountIdStr);
     if (!targetBn) return;
+    const targetInList = accountsList.find((a) => a.accountId === accountIdStr);
+    if (!targetInList) {
+      if (accountsList.length > 0) setYieldAccountId(accountsList[0].accountId);
+      setAppStatus(t("accountNotFound"), "error");
+      return;
+    }
+    const lamports = parseSolToLamports(amountSol);
+    if (lamports <= 0n) {
+      setAppStatus(t("invalidAmount"), "error");
+      return;
+    }
 
     const pdaDest = PublicKey.findProgramAddressSync(
       [
@@ -740,7 +783,7 @@ export default function App() {
     setAppStatus(t("statusYieldWithdrawing"), "default");
     try {
       await program.methods
-        .yieldWithdraw(targetBn)
+        .yieldWithdraw(targetBn, new BN(lamports.toString()))
         .accounts({
           owner: walletPublicKey,
           userYield: userYieldPda,
@@ -752,7 +795,88 @@ export default function App() {
       setUserYieldPosition(null);
       await fetchYieldVaultSummary();
       await fetchAllSavingsAccounts();
-      await refreshBalance(yieldDestAccountId);
+      await refreshBalance(accountIdStr);
+      setAppStatus(t("balanceRefreshed"), "default");
+    } catch (e: any) {
+      setAppStatus(friendlyError(e), "error");
+    }
+  }
+
+  async function handleBorrow(accountIdStr: string, amountSol: string) {
+    if (!program || !walletPublicKey) return;
+    const targetBn = parseU64ToBN(accountIdStr);
+    if (!targetBn) return;
+    const lamports = parseSolToLamports(amountSol);
+    if (lamports <= 0n) {
+      setAppStatus(t("invalidAmount"), "error");
+      return;
+    }
+    const pdaDest = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(targetBn)
+      ],
+      programId
+    )[0];
+
+    invalidatePendingBalanceFetch();
+    setAppStatus("Borrowing...", "default");
+    try {
+      await program.methods
+        .borrow(targetBn, new BN(lamports.toString()))
+        .accounts({
+          owner: walletPublicKey,
+          userYield: getUserYieldPda(walletPublicKey),
+          yieldVault: getYieldVaultPda(),
+          destMiniAccount: pdaDest
+        })
+        .rpc();
+      await fetchYieldVaultSummary();
+      await fetchAllSavingsAccounts();
+      await refreshBalance(accountIdStr);
+      setAppStatus(t("balanceRefreshed"), "default");
+    } catch (e: any) {
+      setAppStatus(friendlyError(e), "error");
+    }
+  }
+
+  async function handleRepay(accountIdStr: string, amountSol: string) {
+    if (!program || !walletPublicKey) return;
+    if (!hasOutstandingDebt) {
+      setAppStatus(i18n.language === "zh" ? "当前没有待还款债务" : "No outstanding debt to repay", "error");
+      return;
+    }
+    const sourceBn = parseU64ToBN(accountIdStr);
+    if (!sourceBn) return;
+    const lamports = parseSolToLamports(amountSol);
+    if (lamports <= 0n) {
+      setAppStatus(t("invalidAmount"), "error");
+      return;
+    }
+    const pdaSrc = PublicKey.findProgramAddressSync(
+      [
+        new TextEncoder().encode(accountSeed),
+        walletPublicKey.toBuffer(),
+        accountIdToLeBytes(sourceBn)
+      ],
+      programId
+    )[0];
+
+    invalidatePendingBalanceFetch();
+    setAppStatus("Repaying...", "default");
+    try {
+      await program.methods
+        .repay(sourceBn, new BN(lamports.toString()))
+        .accounts({
+          owner: walletPublicKey,
+          yieldVault: getYieldVaultPda(),
+          sourceMiniAccount: pdaSrc
+        })
+        .rpc();
+      await fetchYieldVaultSummary();
+      await fetchAllSavingsAccounts();
+      await refreshBalance(accountIdStr);
       setAppStatus(t("balanceRefreshed"), "default");
     } catch (e: any) {
       setAppStatus(friendlyError(e), "error");
@@ -882,9 +1006,39 @@ export default function App() {
   }
 
   const canUseApp = signerMode !== "none" && !!activeSigner && !!walletPublicKey && !!program;
-  const currentYieldApyBps = yieldVaultSummary
-    ? dynamicApyBpsFromPool(yieldVaultSummary.rewardPoolLamports, yieldVaultSummary.totalPrincipalLamports)
-    : MIN_YIELD_APY_BPS;
+  const currentUtilBps = yieldVaultSummary
+    ? utilizationBps(yieldVaultSummary.totalAssetsLamports, yieldVaultSummary.totalBorrowedLamports)
+    : 0;
+  const currentBorrowRateBps = borrowRateBps(currentUtilBps);
+  const currentSupplyRateBps = Math.floor((currentBorrowRateBps * currentUtilBps) / 10_000);
+  const hasOutstandingDebt = (yieldVaultSummary?.totalBorrowedLamports ?? 0n) > 0n;
+  const selectedSavingsBalanceLamports = useMemo(() => {
+    const acct = accountsList.find((a) => a.accountId === yieldAccountId);
+    return acct ? BigInt(acct.balance) : 0n;
+  }, [accountsList, yieldAccountId]);
+  const lendingAccountBalanceLamports = useMemo(() => {
+    const acct = accountsList.find((a) => a.accountId === lendingAccountId);
+    return acct ? BigInt(acct.balance) : 0n;
+  }, [accountsList, lendingAccountId]);
+  const yieldAmountLamports = useMemo(() => parseSolToLamports(yieldAmount), [yieldAmount]);
+  const lendingAmountLamports = useMemo(() => parseSolToLamports(lendingAmount), [lendingAmount]);
+  const canDepositYield = canUseApp && yieldAmountLamports > 0n && yieldAmountLamports <= selectedSavingsBalanceLamports;
+  const canWithdrawYield = canUseApp && yieldAmountLamports > 0n;
+  const canBorrowNow = canUseApp && lendingAmountLamports > 0n;
+  const canRepayNow = canUseApp && hasOutstandingDebt && lendingAmountLamports > 0n && lendingAmountLamports <= lendingAccountBalanceLamports;
+
+  function fillMaxForCurrentTab() {
+    if (yieldActionTab === "lending") {
+      const outstandingDebtLamports = yieldVaultSummary?.totalBorrowedLamports ?? 0n;
+      const repayMaxLamports =
+        lendingAccountBalanceLamports < outstandingDebtLamports
+          ? lendingAccountBalanceLamports
+          : outstandingDebtLamports;
+      setLendingAmount(lamportsToSolStr(repayMaxLamports));
+      return;
+    }
+    setYieldAmount(lamportsToSolStr(selectedSavingsBalanceLamports));
+  }
 
   return (
     <div className="container">
@@ -994,9 +1148,6 @@ export default function App() {
             <button className="primary" onClick={handleAirdrop} disabled={!canUseApp}>
               {t("airdrop")}
             </button>
-            <button onClick={refreshWalletBalance} disabled={!canUseApp}>
-              {t("refresh")}
-            </button>
             <button onClick={() => void handleDisconnectCurrentMode()} disabled={signerMode === "none"}>
               {t("disconnectWallet")}
             </button>
@@ -1010,241 +1161,255 @@ export default function App() {
         </div>
       )}
 
-      <div className="card">
-        <h2>{t("accountAndBalance")}</h2>
-        <div className="row">
-          <button
-            className="primary"
-            onClick={() => setShowCreateModal(true)}
-            disabled={!canUseApp}
-          >
-            {t("createAccount")}
-          </button>
-          <button
-            onClick={() => void refreshBalance()}
-            disabled={!canUseApp || !pda || isRefreshing}
-          >
-            {isRefreshing ? "..." : t("refreshBalance")}
-          </button>
-          <button onClick={() => void fetchAllSavingsAccounts()} disabled={!canUseApp}>
-            {t("refreshList")}
-          </button>
-        </div>
-
-        <div className="balance">
-          <div style={{ color: "var(--text-secondary)", fontSize: "0.95rem" }}>
-            {t("selectedAccountLabel")} · <strong>{balance?.name ?? "—"}</strong>
-          </div>
-          <div className="balanceLine" style={{ marginTop: 12 }}>
-            <span className="balance-hero">{balance ? balanceSolStr : "0.0"}</span>
-            <span className="muted">SOL</span>
-          </div>
-          <div className="balanceLine">
-            <span className="muted">
-              {t("balanceLamports")}: {balance ? lamportsToSolStr(BigInt(balance.balance.toString())) : "0.0"}
-            </span>
-          </div>
-        </div>
+      <div className="module-tabs">
+        <button
+          type="button"
+          className={activeModule === "savings" ? "primary" : ""}
+          onClick={() => setActiveModule("savings")}
+        >
+          {t("moduleSavings")}
+        </button>
+        <button
+          type="button"
+          className={activeModule === "yield" ? "primary" : ""}
+          onClick={() => setActiveModule("yield")}
+        >
+          {t("moduleYield")}
+        </button>
       </div>
 
-      <div className="card">
-        <h2>{t("accountList")}</h2>
-        {accountsList.length === 0 ? (
-          <div className="muted">{t("emptyList")}</div>
-        ) : (
-          <div className="accountList">
-            {accountsList.map((acct) => (
-              <div
-                key={acct.pubkey}
-                className={`accountItem ${acct.accountId === selectedAccountId ? "selected" : ""}`}
-                style={{ cursor: "pointer" }}
-                onClick={() => setSelectedAccountId(acct.accountId)}
+      {activeModule === "savings" ? (
+        <div className="module-grid module-grid--savings">
+          <div className="card">
+            <h2>{t("accountAndBalance")}</h2>
+            <div className="row">
+              <button
+                className="primary"
+                onClick={() => setShowCreateModal(true)}
+                disabled={!canUseApp}
               >
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>{acct.name}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: "0.9rem" }}>
-                  <span className="muted">{t("onChainAddress")}</span>
-                  <span className="mono">{truncateAddress(acct.pubkey)}</span>
-                  <button
-                    className="copy-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      copyToClipboard(acct.pubkey);
-                    }}
-                    title={t("copyAddressTitle")}
-                  >
-                    <CopyIcon />
-                  </button>
-                </div>
-                <div className="muted" style={{ marginBottom: 8 }}>
-                  {t("balanceLamports")}: {lamportsStrToSolStr(acct.balance)}
-                </div>
-                <div className="field">
-                  <label>{t("amountSol")}</label>
-                  <input
-                    value={amountByAccountId[acct.accountId] ?? "0.1"}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setAmountByAccountId((prev) => ({ ...prev, [acct.accountId]: value }));
-                    }}
-                    placeholder="0.1"
-                  />
-                </div>
-                <div className="row">
-                  <button
-                    className="primary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
-                    }}
-                    disabled={!canUseApp}
-                  >
-                    {t("deposit")}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
-                    }}
-                    disabled={!canUseApp}
-                  >
-                    {t("withdraw")}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteAccount(acct.accountId);
-                    }}
-                    disabled={!canUseApp || isDeletingAccount}
-                  >
-                    {t("closeAccount")}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="card" data-yield-tick={yieldUiTick}>
-        <h2>{t("yieldTitle")}</h2>
-        <p className="muted" style={{ fontSize: "0.9rem", marginBottom: 12 }}>
-          {t("yieldApyHint", { apy: (currentYieldApyBps / 100).toFixed(2) })}
-        </p>
-        <div style={{ marginBottom: 12, fontSize: "0.9rem" }}>
-          <span className="muted">{t("yieldVaultAddress")}: </span>
-          <span className="mono">{truncateAddress(getYieldVaultPda().toBase58(), 8)}</span>
-          <button
-            className="copy-btn"
-            type="button"
-            onClick={() => copyToClipboard(getYieldVaultPda().toBase58())}
-            title={t("copyAddressTitle")}
-          >
-            <CopyIcon />
-          </button>
-        </div>
-        <p className="muted" style={{ fontSize: "0.85rem", marginBottom: 16 }}>
-          {t("yieldVaultHint")}
-        </p>
-
-        <div className="field">
-          <label>{t("yieldFundAmount")}</label>
-          <input
-            value={yieldFundAmount}
-            onChange={(e) => setYieldFundAmount(e.target.value)}
-            placeholder="0.1"
-          />
-        </div>
-        <div className="row" style={{ marginBottom: 16 }}>
-          <button className="primary" type="button" onClick={() => void handleFundYieldVault()} disabled={!canUseApp}>
-            {t("yieldFundBtn")}
-          </button>
-        </div>
-
-        {yieldVaultSummary ? (
-          <div className="muted" style={{ marginBottom: 12, fontSize: "0.9rem" }}>
-            <div>
-              {t("yieldRewardPool")}: {lamportsToSolStr(yieldVaultSummary.rewardPoolLamports)}
+                {t("createAccount")}
+              </button>
             </div>
-            <div style={{ marginTop: 6, fontSize: "0.85rem" }}>{t("yieldRewardPoolHint")}</div>
+
+            <div className="balance">
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                {t("selectedAccountLabel")} · <strong>{balance?.name ?? "—"}</strong>
+              </div>
+              <div className="balanceLine" style={{ marginTop: 8 }}>
+                <span className="balance-hero">{balance ? balanceSolStr : "0.0"}</span>
+                <span className="muted">SOL</span>
+              </div>
+              <div className="balanceLine">
+                <span className="muted">
+                  {t("balanceLamports")}: {balance ? lamportsToSolStr(BigInt(balance.balance.toString())) : "0.0"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2>{t("accountList")}</h2>
+            {accountsList.length === 0 ? (
+              <div className="muted">{t("emptyList")}</div>
+            ) : (
+              <div className="accountList">
+                {accountsList.map((acct) => (
+                  <div
+                    key={acct.pubkey}
+                    className={`accountItem ${acct.accountId === selectedAccountId ? "selected" : ""}`}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setSelectedAccountId(acct.accountId)}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{acct.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: "0.8rem" }}>
+                      <span className="muted">{t("onChainAddress")}</span>
+                      <span className="mono">{truncateAddress(acct.pubkey)}</span>
+                      <button
+                        className="copy-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyToClipboard(acct.pubkey);
+                        }}
+                        title={t("copyAddressTitle")}
+                      >
+                        <CopyIcon />
+                      </button>
+                    </div>
+                    <div className="muted" style={{ marginBottom: 6 }}>
+                      {t("balanceLamports")}: {lamportsStrToSolStr(acct.balance)}
+                    </div>
+                    <div className="field">
+                      <label>{t("amountSol")}</label>
+                      <input
+                        value={amountByAccountId[acct.accountId] ?? "0.1"}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setAmountByAccountId((prev) => ({ ...prev, [acct.accountId]: value }));
+                        }}
+                        placeholder="0.1"
+                      />
+                    </div>
+                    <div className="row">
+                      <button
+                        className="primary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeposit(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
+                        }}
+                        disabled={!canUseApp}
+                      >
+                        {t("deposit")}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleWithdraw(acct.accountId, amountByAccountId[acct.accountId] ?? "0.1");
+                        }}
+                        disabled={!canUseApp}
+                      >
+                        {t("withdraw")}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteAccount(acct.accountId);
+                        }}
+                        disabled={!canUseApp || isDeletingAccount}
+                      >
+                        {t("closeAccount")}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {activeModule === "yield" ? <div className="card" data-yield-tick={yieldUiTick}>
+        <div className="yield-header">
+          <div>
+            <h2>{t("yieldTitle")}</h2>
+            <p className="muted">{t("yieldApyHint", { apy: (currentSupplyRateBps / 100).toFixed(2) })}</p>
+          </div>
+          <div className="yield-vault-addr">
+            <span className="muted">{t("yieldVaultAddress")}</span>
+            <div className="row">
+              <span className="mono">{truncateAddress(getYieldVaultPda().toBase58(), 8)}</span>
+              <button
+                className="copy-btn"
+                type="button"
+                onClick={() => copyToClipboard(getYieldVaultPda().toBase58())}
+                title={t("copyAddressTitle")}
+              >
+                <CopyIcon />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p className="muted" style={{ marginBottom: 14 }}>{t("yieldVaultHint")}</p>
+
+        <div className="overview-line">
+          <span>Total: {lamportsToSolStr(yieldVaultSummary?.totalAssetsLamports ?? 0n)} SOL</span>
+          <span>APY: {(currentSupplyRateBps / 100).toFixed(2)}%</span>
+          <span>Util: {(currentUtilBps / 100).toFixed(2)}%</span>
+        </div>
+
+        <div className="yield-position-strip compact">
+          {userYieldPosition ? (
+            <>
+              <div><span className="muted">Shares</span><b>{userYieldPosition.shares.toString()}</b></div>
+              <div><span className="muted">Est. Assets</span><b>{lamportsToSolStr(
+                assetsFromShares(
+                  userYieldPosition.shares,
+                  yieldVaultSummary?.totalAssetsLamports ?? 0n,
+                  yieldVaultSummary?.totalShares ?? 0n
+                )
+              )} SOL</b></div>
+            </>
+          ) : (
+            <span className="muted">{t("yieldNoPosition")}</span>
+          )}
+        </div>
+
+        <div className="yield-core card-lite">
+          <div className="yield-tabs">
+            <button type="button" className={yieldActionTab === "deposit" ? "primary" : ""} onClick={() => setYieldActionTab("deposit")}>{t("deposit")}</button>
+            <button type="button" className={yieldActionTab === "withdraw" ? "primary" : ""} onClick={() => setYieldActionTab("withdraw")}>{t("withdraw")}</button>
+            <button type="button" className={yieldActionTab === "lending" ? "primary" : ""} onClick={() => setYieldActionTab("lending")}>{t("borrowSectionTitle")}</button>
+          </div>
+
+          {yieldActionTab === "deposit" || yieldActionTab === "withdraw" ? (
+            <>
+              <div className="field">
+                <label>{t("yieldTransferAccount")}</label>
+                <select value={yieldAccountId} onChange={(e) => setYieldAccountId(e.target.value)} disabled={!canUseApp || accountsList.length === 0}>
+                  {accountsList.map((a) => <option key={a.accountId} value={a.accountId}>#{a.accountId} · {a.name}</option>)}
+                </select>
+              </div>
+              <div className="input-row">
+                <input value={yieldAmount} onChange={(e) => setYieldAmount(e.target.value)} placeholder="0.1" />
+                <button type="button" className="max-btn" onClick={fillMaxForCurrentTab} disabled={!canUseApp}>MAX</button>
+              </div>
+              {yieldActionTab === "deposit" ? (
+                <button className="primary full" type="button" onClick={() => void handleYieldDeposit(yieldAccountId, yieldAmount)} disabled={!canDepositYield}>
+                  {t("yieldDepositBtn")}
+                </button>
+              ) : (
+                <button className="full" type="button" onClick={() => void handleYieldWithdraw(yieldAccountId, yieldAmount)} disabled={!canWithdrawYield}>
+                  {t("yieldWithdrawBtn")}
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <label>{t("lendingAccount")}</label>
+                <select value={lendingAccountId} onChange={(e) => setLendingAccountId(e.target.value)} disabled={!canUseApp || accountsList.length === 0}>
+                  {accountsList.map((a) => <option key={a.accountId} value={a.accountId}>#{a.accountId} · {a.name}</option>)}
+                </select>
+              </div>
+              <div className="input-row">
+                <input value={lendingAmount} onChange={(e) => setLendingAmount(e.target.value)} placeholder="0.1" />
+                <button type="button" className="max-btn" onClick={fillMaxForCurrentTab} disabled={!canUseApp}>MAX</button>
+              </div>
+              <div className="row action-row">
+                <button type="button" onClick={() => void handleBorrow(lendingAccountId, lendingAmount)} disabled={!canBorrowNow}>
+                  {t("borrowBtn")}
+                </button>
+                <button type="button" onClick={() => void handleRepay(lendingAccountId, lendingAmount)} disabled={!canRepayNow}>
+                  {t("repayBtn")}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        <button type="button" className="text-link danger" onClick={() => void handleDeleteAccount(yieldAccountId)} disabled={!canUseApp || isDeletingAccount}>
+          {t("closeAccount")}
+        </button>
+
+        <button type="button" className="text-link" onClick={() => setShowAdvancedYield((v) => !v)}>
+          {showAdvancedYield ? "收起高级数据 ▲" : "展开高级数据 ▼"}
+        </button>
+
+        {showAdvancedYield && yieldVaultSummary ? (
+          <div className="yield-metrics-grid">
+            <div className="yield-metric"><span>Supply APY</span><b>{(currentSupplyRateBps / 100).toFixed(2)}%</b></div>
+            <div className="yield-metric"><span>Borrow APY</span><b>{(currentBorrowRateBps / 100).toFixed(2)}%</b></div>
+            <div className="yield-metric"><span>Utilization</span><b>{(currentUtilBps / 100).toFixed(2)}%</b></div>
+            <div className="yield-metric"><span>Total Assets</span><b>{lamportsToSolStr(yieldVaultSummary.totalAssetsLamports)} SOL</b></div>
+            <div className="yield-metric"><span>Total Borrowed</span><b>{lamportsToSolStr(yieldVaultSummary.totalBorrowedLamports)} SOL</b></div>
+            <div className="yield-metric"><span>{t("yieldRewardPool")}</span><b>{lamportsToSolStr(yieldVaultSummary.rewardPoolLamports)} SOL</b></div>
+            <div className="yield-metric"><span>Total Shares</span><b>{yieldVaultSummary.totalShares.toString()}</b></div>
+            <div className="yield-metric"><span>Cash In Vault</span><b>{lamportsToSolStr(yieldVaultSummary.cashLamports)} SOL</b></div>
           </div>
         ) : null}
-
-        {userYieldPosition ? (
-          <div style={{ marginBottom: 16 }}>
-            <div className="muted" style={{ marginBottom: 4 }}>
-              {t("yieldPrincipal")}: {lamportsToSolStr(userYieldPosition.principalLamports)}
-            </div>
-            <div className="muted" style={{ marginBottom: 4 }}>
-              {t("yieldAccrued")}: {lamportsToSolStr(userYieldPosition.accruedYieldLamports)}
-            </div>
-            <div style={{ fontWeight: 600 }}>
-              {t("yieldEstimatedTotal")}:{" "}
-              {lamportsToSolStr(
-                estimateYieldTotalLamports(
-                  userYieldPosition.principalLamports,
-                  userYieldPosition.accruedYieldLamports,
-                  userYieldPosition.lastYieldTs,
-                  Math.floor(Date.now() / 1000),
-                  currentYieldApyBps
-                )
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="muted" style={{ marginBottom: 16 }}>
-            {t("yieldNoPosition")}
-          </div>
-        )}
-
-        <div className="field">
-          <label>{t("yieldFromAccount")}</label>
-          <select
-            value={yieldSourceAccountId}
-            onChange={(e) => setYieldSourceAccountId(e.target.value)}
-            disabled={!canUseApp || accountsList.length === 0}
-          >
-            {accountsList.map((a) => (
-              <option key={a.accountId} value={a.accountId}>
-                #{a.accountId} · {a.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <label>{t("amountSol")}</label>
-          <input
-            value={yieldDepositAmount}
-            onChange={(e) => setYieldDepositAmount(e.target.value)}
-            placeholder="0.1"
-          />
-        </div>
-        <div className="row" style={{ marginBottom: 16 }}>
-          <button className="primary" type="button" onClick={() => void handleYieldDeposit()} disabled={!canUseApp}>
-            {t("yieldDepositBtn")}
-          </button>
-        </div>
-
-        <div className="field">
-          <label>{t("yieldToAccount")}</label>
-          <select
-            value={yieldDestAccountId}
-            onChange={(e) => setYieldDestAccountId(e.target.value)}
-            disabled={!canUseApp || accountsList.length === 0}
-          >
-            {accountsList.map((a) => (
-              <option key={a.accountId} value={a.accountId}>
-                #{a.accountId} · {a.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="row">
-          <button type="button" onClick={() => void handleYieldWithdraw()} disabled={!canUseApp}>
-            {t("yieldWithdrawBtn")}
-          </button>
-        </div>
-      </div>
+      </div> : null}
 
       <div className={`status ${statusLine.tone === "error" ? "status--error" : ""}`}>
         <div className="status-line">

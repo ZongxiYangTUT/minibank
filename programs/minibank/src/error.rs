@@ -26,4 +26,10 @@ pub enum ErrorCode {
     YieldVaultInsufficient,
     #[msg("Yield vault total_principal does not match expected invariants")]
     YieldVaultAccountingMismatch,
+    #[msg("Invalid share amount")]
+    InvalidShareAmount,
+    #[msg("Insufficient shares")]
+    InsufficientShares,
+    #[msg("Vault has no liquidity for borrow")]
+    InsufficientBorrowLiquidity,
 }

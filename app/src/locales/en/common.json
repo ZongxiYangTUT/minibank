@@ -75,5 +75,16 @@
   "yieldRewardPoolHint": "On-chain: paid yield = min(your accrued, pool). Shared pool; order of withdrawals matters.",
   "yieldFundAmount": "Fund reward pool (SOL)",
   "yieldFundBtn": "Fund vault",
-  "statusFundingYield": "Funding reward pool…"
+  "statusFundingYield": "Funding reward pool…",
+  "borrowSectionTitle": "Borrow/Repay",
+  "borrowToAccount": "Borrow to savings account",
+  "repayFromAccount": "Repay from savings account",
+  "lendingAccount": "Lending account",
+  "borrowBtn": "Borrow",
+  "repayBtn": "Repay",
+  "yieldTransferTitle": "Yield Deposit/Withdraw",
+  "yieldTransferAccount": "Account",
+  "moduleOverview": "Overview",
+  "moduleSavings": "Savings",
+  "moduleYield": "Yield & Lending"
 }

@@ -112,15 +112,14 @@ pub struct YieldDeposit<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(target_account_id: u64)]
+#[instruction(target_account_id: u64, amount: u64)]
 pub struct YieldWithdraw<'info> {
     pub owner: Signer<'info>,
     #[account(
         mut,
         seeds = [SEED_USER_YIELD, owner.key().as_ref()],
         bump,
-        has_one = owner,
-        close = owner
+        has_one = owner
     )]
     pub user_yield: Account<'info, UserYieldPosition>,
     #[account(
@@ -136,5 +135,53 @@ pub struct YieldWithdraw<'info> {
         has_one = owner
     )]
     pub dest_mini_account: Account<'info, MiniAccount>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(target_account_id: u64)]
+pub struct Borrow<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [SEED_USER_YIELD, owner.key().as_ref()],
+        bump,
+        has_one = owner
+    )]
+    pub user_yield: Account<'info, UserYieldPosition>,
+    #[account(
+        mut,
+        seeds = [SEED_YIELD_VAULT],
+        bump
+    )]
+    pub yield_vault: Account<'info, YieldVault>,
+    #[account(
+        mut,
+        seeds = [SEED_MINI_ACCOUNT, owner.key().as_ref(), &target_account_id.to_le_bytes()],
+        bump,
+        has_one = owner
+    )]
+    pub dest_mini_account: Account<'info, MiniAccount>,
+}
+
+#[derive(Accounts)]
+#[instruction(source_account_id: u64)]
+pub struct Repay<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [SEED_YIELD_VAULT],
+        bump
+    )]
+    pub yield_vault: Account<'info, YieldVault>,
+    #[account(
+        mut,
+        seeds = [SEED_MINI_ACCOUNT, owner.key().as_ref(), &source_account_id.to_le_bytes()],
+        bump,
+        has_one = owner
+    )]
+    pub source_mini_account: Account<'info, MiniAccount>,
     pub system_program: Program<'info, System>,
 }

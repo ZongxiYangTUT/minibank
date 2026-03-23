@@ -22,7 +22,7 @@ function normalizeNetworkFromEndpoint(endpoint: string): SolanaNetwork {
 const endpointFromEnv = ((import.meta as any).env?.VITE_SOLANA_RPC as string | undefined)?.trim();
 const initialNetwork = endpointFromEnv
   ? normalizeNetworkFromEndpoint(endpointFromEnv)
-  : "devnet";
+  : "localhost";
 
 type SolanaNetworkContextValue = {
   selectedNetwork: SolanaNetwork;

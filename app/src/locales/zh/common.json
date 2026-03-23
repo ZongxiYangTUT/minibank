@@ -75,5 +75,16 @@
   "yieldRewardPoolHint": "链上规则：应付利息 = min(你的应计收益, 该池子余额)。多人共用池子时按交易顺序兑付。",
   "yieldFundAmount": "向收益池转入 (SOL)",
   "yieldFundBtn": "注资收益池",
-  "statusFundingYield": "正在向收益池转账…"
+  "statusFundingYield": "正在向收益池转账…",
+  "borrowSectionTitle": "借贷操作",
+  "borrowToAccount": "借出到储蓄账户",
+  "repayFromAccount": "从储蓄账户还款",
+  "lendingAccount": "借贷操作账户",
+  "borrowBtn": "借出",
+  "repayBtn": "还款",
+  "yieldTransferTitle": "余额宝转入/取出",
+  "yieldTransferAccount": "操作账户",
+  "moduleOverview": "总览",
+  "moduleSavings": "储蓄账户",
+  "moduleYield": "余额宝借贷"
 }

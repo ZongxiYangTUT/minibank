@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::contexts::YieldDeposit;
 use crate::error::ErrorCode;
-use crate::yield_accrue::{accrue_yield, dynamic_apy_bps};
+use crate::yield_accrue::accrue_interest;
 
 pub fn process(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Result<()> {
     require!(amount > 0, ErrorCode::InvalidAmount);
@@ -26,9 +26,6 @@ pub fn process(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Resu
         ErrorCode::InsufficientVaultLamports
     );
 
-    let clock = Clock::get()?;
-    let now = clock.unix_timestamp;
-
     let uy = &mut ctx.accounts.user_yield;
     if uy.owner == Pubkey::default() {
         uy.owner = ctx.accounts.owner.key();
@@ -38,17 +35,23 @@ pub fn process(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Resu
         ErrorCode::InvalidRecipient
     );
 
-    let vault_info = ctx.accounts.yield_vault.to_account_info();
-    let rent = Rent::get()?;
-    let vault_space = 8 + crate::state::YieldVault::INIT_SPACE;
-    let min_vault_rent = rent.minimum_balance(vault_space);
-    let available = vault_info
-        .lamports()
-        .checked_sub(min_vault_rent)
-        .ok_or(ErrorCode::MathOverflow)?;
-    let current_apy_bps = dynamic_apy_bps(available, ctx.accounts.yield_vault.total_principal_lamports);
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
+    let vault = &mut ctx.accounts.yield_vault;
+    accrue_interest(vault, now)?;
 
-    accrue_yield(uy, now, current_apy_bps)?;
+    // assets->shares conversion (round down).
+    let minted_shares = if vault.total_shares == 0 || vault.total_assets == 0 {
+        amount
+    } else {
+        ((amount as u128)
+            .checked_mul(vault.total_shares as u128)
+            .and_then(|v| v.checked_div(vault.total_assets as u128))
+            .ok_or(ErrorCode::MathOverflow)?) as u64
+    };
+    require!(minted_shares > 0, ErrorCode::InvalidShareAmount);
+
+    let vault_info = vault.to_account_info();
 
     let mini_lamports = mini_info
         .lamports()
@@ -69,22 +72,25 @@ pub fn process(ctx: Context<YieldDeposit>, account_id: u64, amount: u64) -> Resu
         .checked_sub(amount)
         .ok_or(ErrorCode::MathOverflow)?;
 
-    uy.principal_lamports = uy
-        .principal_lamports
-        .checked_add(amount)
+    uy.shares = uy
+        .shares
+        .checked_add(minted_shares)
         .ok_or(ErrorCode::MathOverflow)?;
 
-    let v = &mut ctx.accounts.yield_vault;
-    v.bump = ctx.bumps.yield_vault;
-    v.total_principal_lamports = v
-        .total_principal_lamports
+    vault.bump = ctx.bumps.yield_vault;
+    vault.total_assets = vault
+        .total_assets
         .checked_add(amount)
+        .ok_or(ErrorCode::MathOverflow)?;
+    vault.total_shares = vault
+        .total_shares
+        .checked_add(minted_shares)
         .ok_or(ErrorCode::MathOverflow)?;
 
     msg!(
-        "Yield deposit ok; principal {}, dynamic apy {} bps",
-        uy.principal_lamports,
-        current_apy_bps
+        "Yield deposit ok; assets {} -> minted shares {}",
+        amount,
+        minted_shares
     );
     Ok(())
 }
