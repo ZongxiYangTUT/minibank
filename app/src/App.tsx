@@ -48,6 +48,10 @@ function lamportsToSolStr(lamports: bigint): string {
   return `${whole.toString()}.${fracStr}`;
 }
 
+function lamportsStrToSolStr(lamportsStr: string): string {
+  return lamportsToSolStr(BigInt(lamportsStr || "0"));
+}
+
 type UserYieldPositionData = {
   principalLamports: bigint;
   accruedYieldLamports: bigint;
@@ -220,7 +224,7 @@ export default function App() {
       return i18n.language === "zh" ? "余额不足" : "Insufficient balance";
     }
     if (raw.includes("InsufficientVaultLamports") || raw.includes("does not have enough lamports")) {
-      return i18n.language === "zh" ? "金库 lamports 不足" : "Insufficient vault lamports";
+      return i18n.language === "zh" ? "金库 SOL 不足" : "Insufficient vault SOL";
     }
     if (raw.includes("InvalidRecipient") || raw.includes("Recipient must match")) {
       return i18n.language === "zh" ? "收款方必须是账户所有者" : "Recipient must be account owner";
@@ -1037,7 +1041,7 @@ export default function App() {
           </div>
           <div className="balanceLine">
             <span className="muted">
-              {t("balanceLamports")}: {balance ? balance.balance.toString() : "0"}
+              {t("balanceLamports")}: {balance ? lamportsToSolStr(BigInt(balance.balance.toString())) : "0.0"}
             </span>
           </div>
         </div>
@@ -1072,7 +1076,7 @@ export default function App() {
                   </button>
                 </div>
                 <div className="muted" style={{ marginBottom: 8 }}>
-                  {t("balanceLamports")}: {acct.balance}
+                  {t("balanceLamports")}: {lamportsStrToSolStr(acct.balance)}
                 </div>
                 <div className="field">
                   <label>{t("amountSol")}</label>
@@ -1160,7 +1164,7 @@ export default function App() {
         {yieldVaultSummary ? (
           <div className="muted" style={{ marginBottom: 12, fontSize: "0.9rem" }}>
             <div>
-              {t("yieldRewardPool")}: {yieldVaultSummary.rewardPoolLamports.toString()}
+              {t("yieldRewardPool")}: {lamportsToSolStr(yieldVaultSummary.rewardPoolLamports)}
             </div>
             <div style={{ marginTop: 6, fontSize: "0.85rem" }}>{t("yieldRewardPoolHint")}</div>
           </div>
@@ -1169,20 +1173,22 @@ export default function App() {
         {userYieldPosition ? (
           <div style={{ marginBottom: 16 }}>
             <div className="muted" style={{ marginBottom: 4 }}>
-              {t("yieldPrincipal")}: {userYieldPosition.principalLamports.toString()}
+              {t("yieldPrincipal")}: {lamportsToSolStr(userYieldPosition.principalLamports)}
             </div>
             <div className="muted" style={{ marginBottom: 4 }}>
-              {t("yieldAccrued")}: {userYieldPosition.accruedYieldLamports.toString()}
+              {t("yieldAccrued")}: {lamportsToSolStr(userYieldPosition.accruedYieldLamports)}
             </div>
             <div style={{ fontWeight: 600 }}>
               {t("yieldEstimatedTotal")}:{" "}
-              {estimateYieldTotalLamports(
-                userYieldPosition.principalLamports,
-                userYieldPosition.accruedYieldLamports,
-                userYieldPosition.lastYieldTs,
-                Math.floor(Date.now() / 1000),
-                currentYieldApyBps
-              ).toString()}
+              {lamportsToSolStr(
+                estimateYieldTotalLamports(
+                  userYieldPosition.principalLamports,
+                  userYieldPosition.accruedYieldLamports,
+                  userYieldPosition.lastYieldTs,
+                  Math.floor(Date.now() / 1000),
+                  currentYieldApyBps
+                )
+              )}
             </div>
           </div>
         ) : (
