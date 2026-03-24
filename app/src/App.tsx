@@ -184,6 +184,13 @@ export default function App() {
     setStatusLine((prev) => (prev.text === text && prev.tone === tone ? prev : { text, tone }));
   }
 
+  function logTxSignature(action: string, signature: string) {
+    // Helps trace user actions in runtime logs.
+    console.log(`[tx:${action}] ${signature}`);
+    const shortSig = signature.length > 16 ? `${signature.slice(0, 8)}...${signature.slice(-8)}` : signature;
+    setAppStatus(`${action} tx: ${shortSig}`, "default");
+  }
+
   const [amountByAccountId, setAmountByAccountId] = useState<Record<string, string>>({});
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [newAccountName, setNewAccountName] = useState<string>("alice-savings");
@@ -520,7 +527,7 @@ export default function App() {
     const userStatsPda = getUserStatsPda(walletPublicKey);
     const exists = await (program.account as any).userStats.fetchNullable(userStatsPda);
     if (exists) return;
-    await program.methods
+    const sig = await program.methods
       .initUserStats()
       .accounts({
         userStats: userStatsPda,
@@ -528,6 +535,7 @@ export default function App() {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+    logTxSignature("initUserStats", sig);
   }
 
   async function handleAirdrop() {
@@ -537,6 +545,7 @@ export default function App() {
     try {
       const sig = await connection.requestAirdrop(walletPublicKey, 1_000_000_000);
       await connection.confirmTransaction(sig, "confirmed");
+      logTxSignature("airdrop", sig);
       setAppStatus(t("airdropConfirmed"), "default");
       await refreshWalletBalance();
     } catch (e: any) {
@@ -569,7 +578,7 @@ export default function App() {
         programId
       )[0];
 
-      await program.methods
+      const sig = await program.methods
         .createAccount(trimmed)
         .accounts({
           userStats: userStatsPda,
@@ -578,6 +587,7 @@ export default function App() {
           systemProgram: SystemProgram.programId
         })
         .rpc();
+      logTxSignature("createAccount", sig);
       const newIdStr = nextIdBn.toString();
       setSelectedAccountId(newIdStr);
       await refreshBalance(newIdStr);
@@ -611,7 +621,7 @@ export default function App() {
     invalidatePendingBalanceFetch();
     setAppStatus(t("statusDepositing"), "default");
     try {
-      await program.methods
+      const sig = await program.methods
         .deposit(accountIdBn, new BN(lamports.toString()))
         .accounts({
           owner: walletPublicKey,
@@ -619,6 +629,7 @@ export default function App() {
           systemProgram: SystemProgram.programId
         })
         .rpc();
+      logTxSignature("deposit", sig);
       setSelectedAccountId(accountIdStr);
       await refreshBalance(accountIdStr);
       await fetchAllSavingsAccounts();
@@ -648,7 +659,7 @@ export default function App() {
     invalidatePendingBalanceFetch();
     setAppStatus(t("statusWithdrawing"), "default");
     try {
-      await program.methods
+      const sig = await program.methods
         .withdraw(accountIdBn, new BN(lamports.toString()))
         .accounts({
           miniAccount: pdaForOp,
@@ -656,6 +667,7 @@ export default function App() {
           recipient: walletPublicKey
         })
         .rpc();
+      logTxSignature("withdraw", sig);
       setSelectedAccountId(accountIdStr);
       await refreshBalance(accountIdStr);
       await fetchAllSavingsAccounts();
@@ -694,7 +706,7 @@ export default function App() {
     invalidatePendingBalanceFetch();
     setAppStatus(t("statusYieldDepositing"), "default");
     try {
-      await program.methods
+      const sig = await program.methods
         .yieldDeposit(accountIdBn, new BN(lamports.toString()))
         .accounts({
           owner: walletPublicKey,
@@ -704,6 +716,7 @@ export default function App() {
           systemProgram: SystemProgram.programId
         })
         .rpc();
+      logTxSignature("yieldDeposit", sig);
       await fetchUserYield();
       await fetchYieldVaultSummary();
       await fetchAllSavingsAccounts();
@@ -745,6 +758,7 @@ export default function App() {
       const signed = await activeSigner.signTransaction(tx);
       const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
       await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      logTxSignature("fundYieldVault", sig);
       await refreshWalletBalance();
       await fetchYieldVaultSummary();
       setAppStatus(t("balanceRefreshed"), "default");
@@ -783,7 +797,7 @@ export default function App() {
     invalidatePendingBalanceFetch();
     setAppStatus(t("statusYieldWithdrawing"), "default");
     try {
-      await program.methods
+      const sig = await program.methods
         .yieldWithdraw(targetBn, new BN(lamports.toString()))
         .accounts({
           owner: walletPublicKey,
@@ -793,6 +807,7 @@ export default function App() {
           systemProgram: SystemProgram.programId
         })
         .rpc();
+      logTxSignature("yieldWithdraw", sig);
       setUserYieldPosition(null);
       await fetchYieldVaultSummary();
       await fetchAllSavingsAccounts();
@@ -824,7 +839,7 @@ export default function App() {
     invalidatePendingBalanceFetch();
     setAppStatus("Borrowing...", "default");
     try {
-      await program.methods
+      const sig = await program.methods
         .borrow(targetBn, new BN(lamports.toString()))
         .accounts({
           owner: walletPublicKey,
@@ -833,6 +848,7 @@ export default function App() {
           destMiniAccount: pdaDest
         })
         .rpc();
+      logTxSignature("borrow", sig);
       await fetchYieldVaultSummary();
       await fetchAllSavingsAccounts();
       await refreshBalance(accountIdStr);
@@ -867,7 +883,7 @@ export default function App() {
     invalidatePendingBalanceFetch();
     setAppStatus("Repaying...", "default");
     try {
-      await program.methods
+      const sig = await program.methods
         .repay(sourceBn, new BN(lamports.toString()))
         .accounts({
           owner: walletPublicKey,
@@ -875,6 +891,7 @@ export default function App() {
           sourceMiniAccount: pdaSrc
         })
         .rpc();
+      logTxSignature("repay", sig);
       await fetchYieldVaultSummary();
       await fetchAllSavingsAccounts();
       await refreshBalance(accountIdStr);
@@ -907,7 +924,7 @@ export default function App() {
     setAppStatus(t("deletingAccount"), "default");
     setIsDeletingAccount(true);
     try {
-      await program.methods
+      const sig = await program.methods
         .deleteAccount(accountIdBn)
         .accounts({
           miniAccount: pdaForDelete,
@@ -915,6 +932,7 @@ export default function App() {
           recipient: walletPublicKey
         })
         .rpc();
+      logTxSignature("deleteAccount", sig);
 
       const listed = await fetchAllSavingsAccounts();
       await refreshWalletBalance();
