@@ -158,6 +158,20 @@ npm install
 npm run dev
 ```
 
+### UI demos
+
+Savings module:
+
+![Savings module](docs/images/savings-module.png)
+
+Yield module:
+
+![Yield module](docs/images/yield-module.png)
+
+Lending module:
+
+![Lending module](docs/images/lending-module.png)
+
 ### Environment
 
 | Variable | Purpose |
