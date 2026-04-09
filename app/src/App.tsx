@@ -1046,6 +1046,7 @@ export default function App() {
   const currentUtilBps = yieldVaultSummary
     ? utilizationBps(yieldVaultSummary.totalAssetsLamports, yieldVaultSummary.totalBorrowedLamports)
     : 0;
+  // 供应利率 = 借款利率 * 资金利用率（简化版本）
   const currentBorrowRateBps = borrowRateBps(currentUtilBps);
   const currentSupplyRateBps = Math.floor((currentBorrowRateBps * currentUtilBps) / 10_000);
   const hasOutstandingDebt = (yieldVaultSummary?.totalBorrowedLamports ?? 0n) > 0n;

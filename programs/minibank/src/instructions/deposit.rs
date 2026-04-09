@@ -23,7 +23,7 @@ pub fn process(ctx: Context<Deposit>, account_id: u64, amount: u64) -> Result<()
         },
     );
     transfer(cpi_context, amount)?;
-
+    // 更新余额
     ctx.accounts.mini_account.balance = ctx
         .accounts
         .mini_account

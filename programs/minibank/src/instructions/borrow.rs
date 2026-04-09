@@ -17,7 +17,10 @@ pub fn process(ctx: Context<Borrow>, target_account_id: u64, amount: u64) -> Res
     accrue_interest(vault, now)?;
 
     let vault_info = vault.to_account_info();
-    require!(vault_info.lamports() >= amount, ErrorCode::InsufficientBorrowLiquidity);
+    require!(
+        vault_info.lamports() >= amount,
+        ErrorCode::InsufficientBorrowLiquidity
+    );
 
     let dest_info = ctx.accounts.dest_mini_account.to_account_info();
     let new_vault = vault_info
@@ -32,12 +35,13 @@ pub fn process(ctx: Context<Borrow>, target_account_id: u64, amount: u64) -> Res
     **vault_info.try_borrow_mut_lamports()? = new_vault;
     **dest_info.try_borrow_mut_lamports()? = new_dest;
 
+    // 增加总借款
     vault.total_borrowed = vault
         .total_borrowed
         .checked_add(amount)
         .ok_or(ErrorCode::MathOverflow)?;
-    // total_assets unchanged on borrow (cash out, debt up).
 
+    // 增加余额
     ctx.accounts.dest_mini_account.balance = ctx
         .accounts
         .dest_mini_account
